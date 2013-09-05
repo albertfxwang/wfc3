@@ -1,5 +1,5 @@
 """
-Get spacecraft pointing geometry from Jitter files.
+Get spacecraft pointing geometry from Jitter files and compare to grism backgrounds.
 """
 import os
 
@@ -13,19 +13,19 @@ import astropy.units as u
 import datetime
 
 def go():
-    import mywfc3.jitter
+    import mywfc3.bg
     
-    mywfc3.jitter.show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'])
-    mywfc3.jitter.show_orbit_limbangle(asn = ['ib3702050', 'ib3702060'])
+    mywfc3.bg.show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'])
+    mywfc3.bg.show_orbit_limbangle(asn = ['ib3702050', 'ib3702060'])
     for i in range(28):
-        mywfc3.jitter.show_orbit_limbangle(asn = ['ib37%02d050' %(i+1), 'ib37%02d060' %(i+1)])
+        mywfc3.bg.show_orbit_limbangle(asn = ['ib37%02d050' %(i+1), 'ib37%02d060' %(i+1)])
     
     asn_files = glob.glob('ibh*030_*asn.fits')
     for asn in asn_files:
         root = asn.split('_asn')[0]
-        mywfc3.jitter.show_orbit_limbangle(asn = [root, root.replace('030', '040')])
+        mywfc3.bg.show_orbit_limbangle(asn = [root, root.replace('030', '040')])
         
-    #mywfc3.jitter.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
+    #mywfc3.bg.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
 
 def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     
@@ -177,4 +177,3 @@ def draw_map_latlon(map, lat, lon, *args, **kwargs):
     #date = datetime.utcnow()
     #CS=m.nightshade(date, alpha=0.2, color='black')
     
-        
