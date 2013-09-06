@@ -177,3 +177,142 @@ def draw_map_latlon(map, lat, lon, *args, **kwargs):
     #date = datetime.utcnow()
     #CS=m.nightshade(date, alpha=0.2, color='black')
     
+def test_ramp(root='ibhj20x7q'):
+    import mywfc3.bg
+    
+    ima = pyfits.open('%s_ima.fits.gz' %(root))
+    ima = pyfits.open('%s_raw.fits.gz' %(root))
+    jitfile = glob.glob('%s0[46]0_jit.fits.gz' %(root[:6]))[0]
+    jit = pyfits.open(jitfile)
+    ext = jit[2]
+    
+    cube, time, NSAMP = mywfc3.bg.split_multiaccum(ima)
+    
+    diff = np.diff(cube, axis=0)
+    ramp_cps = np.median(diff, axis=1)
+    avg_ramp = np.median(ramp_cps, axis=1)
+    plt.plot(time[2:], ramp_cps[1:,16:-16:4], alpha=0.1, color='black')
+    plt.plot(time[2:], avg_ramp[1:], alpha=0.8, color='red', linewidth=2)
+    
+    dt = np.diff(time)[3]
+    
+    #### GOODS-S
+    # ok_samp = diff[1:4,:,:]
+    
+    #ok_samp = diff[-6:,:,:]
+    #mi, ma = -3,-1
+    #mi, ma = -4, -3
+    ok = np.arange(NSAMP-2)[avg_ramp[1:] < 1.2*avg_ramp[1:].min()]
+    #source = (cube[ma,:,:]-cube[mi,:,:])/(time[ma]-time[mi])*dt
+    #source_mean = np.mean(ok_samp, axis=0)
+    source = np.sum(diff[ok+1,:,:], axis=0)/(len(ok))
+
+    sky = cube*0.
+    for i in range(NSAMP-1):
+        sky[i,:,:] = (diff[i,:,:] - source*np.diff(time)[i]/dt)
+        
+    #sky = cube[:,:,:] - np.median(ok_samp, axis=0)*np.arange(1,NSAMP+1) #*NSAMP #*np.diff(time)[-1]
+    for i in range(NSAMP-1):
+        ds9.view((sky[i,:,:])/dt)
+        
+    sky0 = 0.
+    for i in range(NSAMP-2):
+        sky0 += np.median(sky[i+1,:,:])
+    
+    sky0 /= (time[-1]-time[1])
+    skysum = np.sum(sky[1:,:,:]/(time[-1]-time[1]), axis=0)
+    import scipy.ndimage as nd
+    skysum_sm = nd.convolve(skysum, np.ones((5,5))/25.)
+    cleaned1 = cube[-1,:,:]/time[-1]-skysum
+    cleaned0 = cube[-1,:,:]/time[-1]-sky0
+    
+    #
+    FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+        
+    ramp = np.median(cube, axis=1)
+    plt.plot(time[1:], ramp[1:,16:-16:4], alpha=0.1, color='black')
+    
+    cps = np.diff(ramp[:,16])/np.diff(time)
+    plt.scatter(time[1:], cps, color='black')
+    
+    from scipy import polyfit, polyval
+    c = polyfit(time[1:], curve, 3)
+    plt.scatter(time[1:], curve, color='black')
+    fit = polyval(c, time[1:], color='blue')
+    fit0 = polyval(c[-2:], time[1:])
+    plt.plot(time[1:], fit0, color='red')
+    
+def split_multiaccum(ima):
+    
+    FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+    #FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), ima[0].header['PFLTFILE'].split('$')[1]))[1].data
+    
+    NSAMP = ima[0].header['NSAMP']
+    sh = ima['SCI',1].shape
+    cube = np.zeros((NSAMP, sh[0], sh[1]))
+    time = np.zeros(NSAMP)
+    for i in range(NSAMP):
+        #cube[NSAMP-2-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']-ima['SCI',i+2].data*ima['TIME',i+2].header['PIXVALUE']
+        if 'raw' in ima.filename():
+            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/FLAT_F140W
+        else:
+            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
+        #
+        time[NSAMP-1-i] = ima['TIME',i+1].header['PIXVALUE']
+    
+    return cube, time, NSAMP
+
+### 2D surface http://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-order-dependent
+import itertools
+import numpy as np
+import matplotlib.pyplot as plt
+
+def xx():
+    # Generate Data...
+    numdata = 1024
+    x = np.random.random(numdata)
+    y = np.random.random(numdata)
+    z = x**2 + y**2 + 3*x**3 + y + np.random.random(numdata)
+    
+    yi, xi = np.indices(skysum.shape)
+    dq = skysum*0
+    dq[5:-5,5:-5] += flt['DQ'].data
+    ok = (skysum > 0) & (skysum < 1) & (dq == 0) # & (xi % 2 == 0) & (yi % 2 == 0) & (xi > 10) & (xi < 1014) & (yi > 10) & (yi < 1014) 
+    x, y, z = (xi[ok]*1.-512)/512., (yi[ok]*1.-512)/512., skysum[ok]
+    
+    # Fit a 3rd order, 2d polynomial
+    m = polyfit2d(x, y, z, order=33)
+    zz = polyval2d((xi*1.-512)/512., (yi*1.-512)/512., m)
+    
+    fft = np.fft.fft(skysum)
+    ifft = np.fft.ifft(fft)
+    
+    ff = nd.fourier.fourier_gaussian(skysum, 0.1)
+    
+    # Evaluate it on a grid...
+    nx, ny = 20, 20
+    xx, yy = np.meshgrid(np.linspace(x.min(), x.max(), nx), 
+                         np.linspace(y.min(), y.max(), ny))
+    zz = polyval2d(xx, yy, m)
+
+    # Plot
+    plt.imshow(zz, extent=(x.min(), y.max(), x.max(), y.min()))
+    plt.scatter(x, y, c=z)
+    plt.show()
+
+def polyfit2d(x, y, z, order=3):
+    ncols = (order + 1)**2
+    G = np.zeros((x.size, ncols))
+    ij = itertools.product(range(order+1), range(order+1))
+    for k, (i,j) in enumerate(ij):
+        G[:,k] = x**i * y**j
+    m, _, _, _ = np.linalg.lstsq(G, z)
+    return m
+
+def polyval2d(x, y, m):
+    order = int(np.sqrt(len(m))) - 1
+    ij = itertools.product(range(order+1), range(order+1))
+    z = np.zeros_like(x)
+    for a, (i,j) in zip(m, ij):
+        z += a * x**i * y**j
+    return z
