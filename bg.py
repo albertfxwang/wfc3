@@ -24,14 +24,22 @@ def go():
     for asn in asn_files:
         root = asn.split('_asn')[0]
         mywfc3.bg.show_orbit_limbangle(asn = [root, root.replace('030', '040')])
-        
+    
+    os.chdir('/Users/brammer/WFC3/Backgrounds/MultiAccum')
+    asn_files = glob.glob('*asn.fits')
+    for asn in asn_files[7:]:
+        root = asn.split('_asn')[0]
+        mywfc3.bg.show_orbit_limbangle(asn = [root])
+            
+    mywfc3.bg.show_orbit_limbangle(asn = ['ibhj44040'])
+    
     #mywfc3.bg.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
 
 def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     
     import scipy.ndimage as nd
     
-    os.chdir('/Users/brammer/WFC3/Jitter')
+    # os.chdir('/Users/brammer/WFC3/Jitter')
     
     #direct, grism = 'ib3701050', 'ib3701060'
     #direct, grism = 'ibhj20030', 'ibhj20040'
@@ -95,22 +103,28 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
         #plt.plot((pstr-tstr).sec + ext.data['Seconds'], ext.data['DayNight']*20, color=colors[i], linewidth=5, alpha=0.1)
         #
         #### Show background level
-        flt = pyfits.open('../Backgrounds/G141/FLT/%s_flt.fits.gz' %(expname))
-        # if FLAT_FILE != flt[0].header['PFLTFILE']:
-        #     FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), flt[0].header['PFLTFILE'].split('$')[1]))[1].data[5:-5, 5:-5]
-        #     FLAT_FILE = flt[0].header['PFLTFILE']
+        #flt = pyfits.open('../Backgrounds/G141/FLT/%s_flt.fits.gz' %(expname))
+        # flt = pyfits.open('%s_flt.fits' %(expname))
+        # # if FLAT_FILE != flt[0].header['PFLTFILE']:
+        # #     FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), flt[0].header['PFLTFILE'].split('$')[1]))[1].data[5:-5, 5:-5]
+        # #     FLAT_FILE = flt[0].header['PFLTFILE']
+        # #
+        # flt[1].data /= FLAT_F140W
+        # xc, yc, NY = 707, 507, 100
+        # subim = flt[1].data[yc-NY:yc+NY, xc-NY:xc+NY]
+        # med_background = np.median(subim)
+        # ax3.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LimbAng']*0+med_background, color=colors[i], linewidth=2)
+        ima = pyfits.open('%s_ima.fits' %(expname))
+        time, ramp, reads = get_bg_ramp(ima)
+        ax3.plot(((pstr-tstr).sec + time[1:])/60., ramp/np.diff(time), color=colors[i], linewidth=2)
         #
-        flt[1].data /= FLAT_F140W
-        xc, yc, NY = 707, 507, 100
-        subim = flt[1].data[yc-NY:yc+NY, xc-NY:xc+NY]
-        med_background = np.median(subim)
-        ax3.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LimbAng']*0+med_background, color=colors[i], linewidth=2)
-        #
-        if i > 3:
+        #img = nd.convolve(flt[1].data, np.ones((2,2))/4.)/med_background
+        img = nd.convolve(ima['SCI', 1].data[5:-5, 5:-5], np.ones((2,2))/4.)/np.mean(ramp/np.diff(time))/FLAT_F140W
+        if i > -1:
             ax_im = fig.add_axes((0.05+0.30/2*(i % 4)*1.05,0.09+0.28*2+0.01,0.30/2.,0.30))
-            ax_im.imshow(nd.convolve(flt[1].data, np.ones((2,2))/4.)/med_background, vmin=0.6, vmax=1/0.6, interpolation='gaussian')
+            ax_im.imshow(img, vmin=0.6, vmax=1/0.6, interpolation='gaussian')
             ax_im.set_xticklabels([]); ax_im.set_yticklabels([])
-            trace = np.median(flt[1].data/med_background, axis=0)
+            trace = np.median(img, axis=0)
             xtr = np.arange(trace.size)
             ax_im.plot(xtr, (trace-1)*2500.+507, color='white', alpha=0.8, linewidth=3)
             ax_im.plot(xtr, (trace-1)*2500.+507, color='black', alpha=0.7, linewidth=1)
@@ -141,7 +155,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     CS=map.nightshade(date, alpha=0.2, color='black')
     ax2.set_title(tstr.iso)
     
-    plt.savefig('%s_orbit.png' %(targname))
+    plt.savefig('%s_orbit.png' %(asn[0]))
     plt.close()
     
 def init_map(ax=None):
@@ -156,7 +170,7 @@ def init_map(ax=None):
     # lat_ts is the latitude of true scale.
     # resolution = 'c' means use crude resolution coastlines.
     map = Basemap(projection='merc',llcrnrlat=-70,urcrnrlat=70,\
-                llcrnrlon=-180, urcrnrlon=-180+480, lat_ts=20, resolution='c', ax=ax)
+                llcrnrlon=-20, urcrnrlon=380, lat_ts=20, resolution='c', ax=ax)
     #map = Basemap(resolution='c',projection='ortho',lat_0=10.,lon_0=95., ax=ax)
     #
     #m.drawcoastlines()
@@ -171,17 +185,23 @@ def init_map(ax=None):
     return map
     
 def draw_map_latlon(map, lat, lon, *args, **kwargs):
-    xpt,ypt = map(lon, lat)
+    w = lon < 180
+    e = lon >= 180
+    xpt, ypt = map(lon[w], lat[w])
     map.plot(xpt, ypt, alpha=0.5, **kwargs)
-    map.scatter(xpt[0], ypt[0], alpha=0.5, **kwargs)
+    xpt, ypt = map(lon[e], lat[e])
+    map.plot(xpt, ypt, alpha=0.5, **kwargs)
+    xpt, ypt = map(lon[0], lat[0])
+    map.scatter(xpt, ypt, alpha=0.5, **kwargs)
     #date = datetime.utcnow()
     #CS=m.nightshade(date, alpha=0.2, color='black')
+    
     
 def test_ramp(root='ibhj20x7q'):
     import mywfc3.bg
     
-    ima = pyfits.open('%s_ima.fits.gz' %(root))
-    ima = pyfits.open('%s_raw.fits.gz' %(root))
+    #ima = pyfits.open('%s_ima.fits.gz' %(root))
+    ima = pyfits.open('%s_raw.fits' %(root))
     jitfile = glob.glob('%s0[46]0_jit.fits.gz' %(root[:6]))[0]
     jit = pyfits.open(jitfile)
     ext = jit[2]
@@ -203,6 +223,8 @@ def test_ramp(root='ibhj20x7q'):
     #mi, ma = -3,-1
     #mi, ma = -4, -3
     ok = np.arange(NSAMP-2)[avg_ramp[1:] < 1.2*avg_ramp[1:].min()]
+    ok = np.array([np.arange(NSAMP-2)[avg_ramp[1:].argmin()]])
+    
     #source = (cube[ma,:,:]-cube[mi,:,:])/(time[ma]-time[mi])*dt
     #source_mean = np.mean(ok_samp, axis=0)
     source = np.sum(diff[ok+1,:,:], axis=0)/(len(ok))
@@ -253,10 +275,10 @@ def split_multiaccum(ima):
     time = np.zeros(NSAMP)
     for i in range(NSAMP):
         #cube[NSAMP-2-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']-ima['SCI',i+2].data*ima['TIME',i+2].header['PIXVALUE']
-        if 'raw' in ima.filename():
-            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/FLAT_F140W
-        else:
+        if ima[0].header['UNITCORR'] == 'COMPLETE':
             cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
+        else:
+            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/FLAT_F140W
         #
         time[NSAMP-1-i] = ima['TIME',i+1].header['PIXVALUE']
     
@@ -268,6 +290,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def xx():
+    """
+    Try fitting a 2D polynomial to the sky background
+    """
     # Generate Data...
     numdata = 1024
     x = np.random.random(numdata)
@@ -316,3 +341,96 @@ def polyval2d(x, y, m):
     for a, (i,j) in zip(m, ij):
         z += a * x**i * y**j
     return z
+
+def get_bg_ramp(ima):
+    cube, time, NSAMP = split_multiaccum(ima)
+    dt = np.diff(time)
+    reads = np.diff(cube, axis=0)
+    ramp = np.median(reads[:,200:-200,200:-200].reshape((NSAMP-1, -1)), axis=1)
+    return time, ramp, reads
+    
+def test_cal_steps():
+    
+    FIRST = ['DQICORR', 'ZSIGCORR', 'BLEVCORR', 'ZOFFCORR', 'NLINCORR', 'DARKCORR', 'PHOTCORR']
+    SECOND = ['UNITCORR', 'CRCORR', 'FLATCORR']
+
+    FIRST = ['DQICORR', 'ZSIGCORR', 'BLEVCORR', 'ZOFFCORR', 'NLINCORR', 'DARKCORR', 'PHOTCORR', 'UNITCORR', 'FLATCORR']
+    SECOND = ['CRCORR']
+    
+    file='ibhj44mrq_raw.fits'
+    mywfc3.bg.run_wf3ir(file=file, PERFORM=FIRST, OMIT=SECOND)
+    
+    ima = pyfits.open(file.replace('raw', 'ima'), mode='update')
+    cube, time, NSAMP = mywfc3.bg.split_multiaccum(ima)
+    dt = np.diff(time)
+    reads = np.diff(cube, axis=0)
+    ramp = np.median(reads[:,200:-200,200:-200].reshape((NSAMP-1, -1)), axis=1)
+    ok = dt > 50
+
+    cut_ramp = np.median(reads[:,5:-5,5:-5], axis=1)
+    
+    ramp_counts = np.median(reads[:,5:-5,:], axis=1)
+    avg_ramp = np.median(ramp_counts[:,5:-5], axis=1)
+    plt.plot(time[2:], ramp_counts[1:,16:-16:4], alpha=0.1, color='black')
+    plt.plot(time[2:], avg_ramp[1:], alpha=0.8, color='red', linewidth=2)
+    
+    min_bg_idx = avg_ramp[1:].argmin()+1
+    baseline_object_cps = reads[min_bg_idx,:,:]/dt[min_bg_idx]
+    baseline_object_dq = ima['DQ', NSAMP-min_bg_idx-1].data
+    
+    sky = cube*0.
+    for i in range(NSAMP-1):
+        sky[i+1,:,:] = (reads[i,:,:] - baseline_object_cps*dt[i])
+    
+    avg_excess = np.median(sky[:,5:-5,5:-5].reshape((NSAMP, -1)), axis=1)
+    sum_excess = np.cumsum(avg_excess)
+    for i in range(NSAMP):
+        ima['SCI', i+1].data -= sum_excess[-(i+1)]
+    #
+    ima.flush()
+    #
+    # for i in range(NSAMP-1):
+    #     ds9.view((sky[i+1,:,:])/dt)
+    
+    mywfc3.bg.run_wf3ir(file='ibhj44mrq_ima.fits', PERFORM=SECOND, OMIT=FIRST)
+    
+def run_wf3ir(file='ibhj44mrq_raw.fits', 
+              OMIT = ['UNITCORR', 'CRCORR', 'FLATCORR'], 
+              PERFORM = ['DQICORR', 'ZSIGCORR', 'BLEVCORR', 'ZOFFCORR', 'NLINCORR', 'DARKCORR', 'PHOTCORR'], 
+              verbose=True, clean=True, 
+              ):
+    """
+    Perform steps before up-the-ramp sampling on a raw image to improve time-variable
+    background subtraction of extra earthglow
+    """
+    os.chdir("/Users/brammer/WFC3/Backgrounds/CalWFC3")
+    from wfc3tools import calwf3
+    
+    im = pyfits.open(file, mode='update')
+    for key in PERFORM:
+        im[0].header.update(key, 'PERFORM')
+    
+    for key in OMIT:
+        im[0].header.update(key, 'OMIT')
+    
+    im.flush()
+    
+    flt = file.replace('ima', 'flt').replace('raw', 'flt')
+    
+    if clean:
+        if 'raw' in file:
+            for ext in ['ima', 'flt']:
+                if os.path.exists(file.replace('raw', ext)):
+                    os.remove(file.replace('raw', ext))
+        else:
+            for ext in ['ima', 'flt']:
+                if os.path.exists(file.replace('ima', 'ima_%s' %ext)):
+                    os.remove(file.replace('ima', 'ima_%s' %ext))
+            
+    calwf3.calwf3(file, verbose=verbose)
+    
+    
+    
+    
+    
+    
