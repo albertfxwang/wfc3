@@ -403,7 +403,7 @@ def run_wf3ir(file='ibhj44mrq_raw.fits',
     Perform steps before up-the-ramp sampling on a raw image to improve time-variable
     background subtraction of extra earthglow
     """
-    os.chdir("/Users/brammer/WFC3/Backgrounds/CalWFC3")
+    #os.chdir("/Users/brammer/WFC3/Backgrounds/CalWFC3")
     from wfc3tools import calwf3
     
     im = pyfits.open(file, mode='update')
