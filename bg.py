@@ -13,6 +13,7 @@ import astropy.units as u
 import datetime
 
 from mywfc3.utils import gzfile
+import unicorn
 
 def go():
     import mywfc3.bg
