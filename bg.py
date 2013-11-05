@@ -97,7 +97,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     # colors.extend(['green'] * (len(jit_grism)-1))
     
     #fig = plt.figure(figsize=(12,6))
-    fig = unicorn.plotting.plot_init(xs=12, aspect=0.5)
+    fig = unicorn.plotting.plot_init(xs=12, aspect=0.5, NO_GUI=True)
     ax1 = fig.add_axes((0.05,0.09,0.6,0.28))
     
     ax3 = fig.add_axes((0.05,0.09+0.28,0.6,0.28))
