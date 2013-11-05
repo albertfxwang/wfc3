@@ -12,6 +12,8 @@ import astropy.units as u
 
 import datetime
 
+from mywfc3.utils import gzfile
+
 def go():
     import mywfc3.bg
     
@@ -26,13 +28,31 @@ def go():
         mywfc3.bg.show_orbit_limbangle(asn = [root, root.replace('030', '040')])
     
     os.chdir('/Users/brammer/WFC3/Backgrounds/MultiAccum')
-    asn_files = glob.glob('*asn.fits')
-    for asn in asn_files[7:]:
-        root = asn.split('_asn')[0]
+    asn_files = glob.glob('*jit.fits*')
+    for asn in asn_files:
+        root = asn.split('_jit')[0]
         mywfc3.bg.show_orbit_limbangle(asn = [root])
-            
+        
     mywfc3.bg.show_orbit_limbangle(asn = ['ibhj44040'])
     
+    ### Overall programs
+    os.chdir('/Users/brammer/WFC3/GrismPrograms/CANDELS-SNe/RAW/')
+    
+    SKIP=True
+    
+    asn_files = glob.glob('*asn.fits')
+    for asn in asn_files:
+        root = asn.split('_asn')[0]
+        png = glob.glob(root+'*orbit.*')
+        if (len(png) > 0) & SKIP:
+            continue
+        try:
+            mywfc3.bg.show_orbit_limbangle(asn = [root])
+        except:
+            fp = open(root+'_orbit.failed','w')
+            fp.write('---')
+            fp.close()
+            
     #mywfc3.bg.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
 
 def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
@@ -48,9 +68,14 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     
     jit, colors = [], []
     for i, id in enumerate(asn):
-        jit_file = pyfits.open('%s_jit.fits' %(id))
+        jit_file = pyfits.open(gzfile('%s_jit.fits' %(id)))
         jit.extend(jit_file[1:])
         colors.extend([color_list[i]]*(len(jit_file)-1))
+    
+    try:
+        jif = pyfits.open(gzfile('%s_jif.fits' %(asn[0])))[1:]
+    except:
+        jif = None
         
     #jit_direct = pyfits.open('%s_jit.fits' %(direct))
     #jit_grism = pyfits.open('%s_jit.fits' %(grism))
@@ -65,6 +90,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     FLAT_IMAGE = None
     
     FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data[5:-5, 5:-5]
+    FLAT_F105W = pyfits.open(os.path.join(os.getenv('iref'), 'uc72113oi_pfl.fits'))[1].data[5:-5, 5:-5]
     
     # colors = ['blue'] * (len(jit_direct)-1)
     # colors.extend(['green'] * (len(jit_grism)-1))
@@ -77,7 +103,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     for i, ext in enumerate(jit):
         expname = ext.header['EXPNAME'][:-1]+'q'
         print expname
-        spt = pyfits.getheader(expname+'_spt.fits', 0)
+        spt = pyfits.getheader(gzfile(expname+'_spt.fits'), 0)
         if i == 0:
             targname = spt['TARGNAME']
             ax3.text(0.5, 0.95, targname, ha='center', va='top', transform=ax3.transAxes)
@@ -91,6 +117,9 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
         ax1.text(0.05+0.14*(i % 4), 0.95-0.08*(i/4), expname, ha='left', va='top', color=colors[i], transform=ax1.transAxes, size=9)
         #### Plot curves
         ax1.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LimbAng'], color=colors[i], linewidth=2)
+        ok = ext.data['TermAng'] < 1000
+        ax1.plot((((pstr-tstr).sec + ext.data['Seconds'])/60.)[ok], ext.data['TermAng'][ok], color='green', alpha=0.4, linewidth=2)
+        ax1.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LOS_Zenith'], color='orange', alpha=0.4, linewidth=2)
         #
         bright = ext.data['BrightLimb'] == 1
         ax1.plot(((pstr-tstr).sec + ext.data['Seconds'][bright])/60., ext.data['LimbAng'][bright], color=colors[i], linewidth=6, alpha=0.5)
@@ -114,15 +143,60 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
         # subim = flt[1].data[yc-NY:yc+NY, xc-NY:xc+NY]
         # med_background = np.median(subim)
         # ax3.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LimbAng']*0+med_background, color=colors[i], linewidth=2)
-        ima = pyfits.open('%s_ima.fits' %(expname))
+        ima = pyfits.open(gzfile('%s_raw.fits' %(expname)))
+        FILTER = ima[0].header['FILTER']
         time, ramp, reads = get_bg_ramp(ima)
-        ax3.plot(((pstr-tstr).sec + time[1:])/60., ramp/np.diff(time), color=colors[i], linewidth=2)
+        dt = np.diff(time)
+        ok = dt > 24
+        ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., (ramp/dt*2.5)[ok], color=colors[i], linewidth=2)
         #
+        ##
+        ## JIF Shadow
+        if jif is not None:
+            shadow_in = astropy.time.Time(jif[i].header['SHADOENT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+            shadow_out = astropy.time.Time(jif[i].header['SHADOEXT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+            dt_in = (shadow_in-pstr).sec
+            dt_out = (shadow_out-pstr).sec
+            print 'JIF: in=%.3f out=%.3f' %(dt_in, dt_out)
+            if dt_in > 0:
+                yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*2.5)[ok])
+                ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color='green', alpha=0.8)
+            #
+            if (dt_out > 0) & (dt_out < time.max()):
+                yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*2.5)[ok])
+                ax3.scatter(((pstr-tstr).sec + dt_out)/60., yi, marker='o', s=40, color='red', alpha=0.8)
+                
+        #### Make log
+        idx = np.arange(len(time)-1)[ok]
+        fp = open('%s_%s_orbit.dat' %(ext.header['EXPNAME'], FILTER), 'w')
+        dtypes = {'E':'%.3f', 'D':'%.3f', 'I':'%d'}
+        line = '# name read  bg minbg'
+        for c in ext.data.columns:
+            line += ' %s' %(c.name)
+        fp.write(line+'\n')
+        
+        for il in idx:
+            line = '%s_%02d %2d %.3f %.3f' %(ext.header['EXPNAME'], il, il, ramp[il]/dt[il]*2.5, np.min((ramp/dt*2.5)[ok]))
+            for c in ext.data.columns:
+                val = np.interp(time[1:][il]-dt[il]/2., ext.data['Seconds'], ext.data[c.name])
+                line += ' ' + dtypes[c.format] %(val) # %(str(np.cast[dtypes[c.format]](val)))
+            #
+            fp.write(line+'\n')
+        fp.close()
+        
         #img = nd.convolve(flt[1].data, np.ones((2,2))/4.)/med_background
-        img = nd.convolve(ima['SCI', 1].data[5:-5, 5:-5], np.ones((2,2))/4.)/np.mean(ramp/np.diff(time))/FLAT_F140W
+        last_read = (ima['SCI', 1].data-ima['SCI',len(time)].data)[5:-5, 5:-5]*2.5
+        FLAT = FLAT_F140W
+        if FILTER in ['G102', 'F105W']:
+            FLAT = FLAT_F105W
+            
+        last_read = nd.minimum_filter(last_read/FLAT, size=2)
+        img = nd.convolve(last_read, np.ones((2,2))/4.)/time[-1]
+        img /= np.median(img[400:600,400:600])
+        
         if i > -1:
-            ax_im = fig.add_axes((0.05+0.30/2*(i % 4)*1.05,0.09+0.28*2+0.01,0.30/2.,0.30))
-            ax_im.imshow(img, vmin=0.6, vmax=1/0.6, interpolation='gaussian')
+            ax_im = fig.add_axes((0.05+0.30/2*i*1.05,0.09+0.28*2+0.01,0.30/2.,0.30))
+            ax_im.imshow(img, vmin=0.65, vmax=1/0.57, interpolation='gaussian')
             ax_im.set_xticklabels([]); ax_im.set_yticklabels([])
             trace = np.median(img, axis=0)
             xtr = np.arange(trace.size)
@@ -132,13 +206,14 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
             
     ax1.set_xlabel(r'$\Delta t$ (minutes)')
     ax1.set_ylabel('JIT: LimbAng')
-    ax1.set_ylim(0,89)
+    ax1.set_ylim(0,99)
     xl = ax1.get_xlim()
     ax1.plot([-10,xl[1]], [20,20], linestyle=':')
     ax1.set_xlim(-10, xl[1])
     ax3.set_xlim(-10, xl[1])
+    #ax3.legend(loc='upper left', prop={'size':8})
     
-    ax3.set_ylim(0,3)
+    ax3.set_ylim(0,3.8)
     ax3.set_xticklabels([])
     ax3.set_ylabel('backg (electrons/s)')
     ax2 = fig.add_axes((0.66,0.14,0.33,0.4))
@@ -155,7 +230,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     CS=map.nightshade(date, alpha=0.2, color='black')
     ax2.set_title(tstr.iso)
     
-    plt.savefig('%s_orbit.png' %(asn[0]))
+    plt.savefig('%s_%s_orbit.png' %(asn[0], FILTER))
     plt.close()
     
 def init_map(ax=None):
@@ -341,7 +416,7 @@ def polyval2d(x, y, m):
     for a, (i,j) in zip(m, ij):
         z += a * x**i * y**j
     return z
-
+    
 def get_bg_ramp(ima):
     cube, time, NSAMP = split_multiaccum(ima)
     dt = np.diff(time)
@@ -430,7 +505,245 @@ def run_wf3ir(file='ibhj44mrq_raw.fits',
     calwf3.calwf3(file, verbose=verbose)
     
     
+def background_emission_line():
+    """
+    In some high background G141 observations, it looks like the dispersed "blobs" become point sources indicative
+    of a stong emission-line component of the background.  That feature is at the far blue edge of the G141 spectrum 
+    and therefore difficult to determine the wavelength for.  
+    
+    It turns out that the feature can also be seen in G102, specifically exposure 'ibl004lwq' from Koekemoer's AGN 
+    program.  Figure out what the wavelength is.
+    
+    He I, a strong line in the sunlit aurora
+    
+    """
+    
+    os.chdir('/Users/brammer/WFC3/GrismPrograms/Koekemoer/BackgroundG102')
+    
+    asn = threedhst.utils.ASNFile('../RAW/ibl004010_asn.fits')
+    
+    asn.exposures = ['ibl004lwq']
+    asn.product = 'BLOB-G102'
+    asn.write('BLOB-G102_asn.fits')
+
+    asn.exposures = ['ibl004l3q']
+    asn.product = 'BLOB-F104W'
+    asn.write('BLOB-F140W_asn.fits')
+    
+    threedhst.process_grism.fresh_flt_files('BLOB-G102_asn.fits')
+    
+    #### Subtract background and add a source for the blob extraction
+    FLAT_F105W = pyfits.open(os.path.join(os.getenv('iref'), 'uc72113oi_pfl.fits'))[1].data[5:-5, 5:-5]
+    blobs = [(230, 418), (467, 377)]
+    source = FLAT_F105W*0.
+    for blob in blobs:
+        yi, xi = np.indices(FLAT_F105W.shape)
+        r = np.sqrt((xi-blob[0])**2+(yi-blob[1])**2)
+        source[r < 20] += 1./FLAT_F105W[r < 20]-1
+        #source[r > 20] = 0
+    
+    threedhst.process_grism.fresh_flt_files('BLOB-F140W_asn.fits')
+    im = pyfits.open('ibl004l3q_flt.fits', mode='update')
+    im[1].data += source*50-np.median(im[1].data)
+    im.flush()
+
+    unicorn.reduce.interlace_combine('BLOB-F140W', growx=1, growy=1)
+    threedhst.shifts.make_blank_shiftfile('BLOB-F140W_asn.fits')
+    threedhst.prep_flt_files.startMultidrizzle('BLOB-F140W_asn.fits', final_scale=0.128254, pixfrac=1)
+    
+    unicorn.reduce.interlace_combine('BLOB-G102', growx=1, growy=1)
+    
+    model = unicorn.reduce.GrismModel(root='BLOB', grow_factor=1, growx=1, growy=1, MAG_LIMIT=21, use_segm=False, grism='G102')
+    ### BLob
+    model.twod_spectrum(108, miny=-100)
+    model.twod_spectrum(119, miny=-100)
+    ### Star
+    model.twod_spectrum(74, miny=-100)
+    
+    twod = unicorn.reduce.Interlace2D('BLOB_00108.2D.fits')
+    spec = twod.im['SCI'].data
+    spec = np.median(spec)/spec-1
+    lam, spec1d = twod.optimal_extract(spec)
+    
+    kernel = np.sum(twod.thumb**2, axis=0)
+    kernel -= np.mean(kernel[0:30])
+    kernel /= kernel.sum()
+
+    twod = unicorn.reduce.Interlace2D('BLOB_00119.2D.fits')
+    spec = twod.im['SCI'].data
+    spec = np.median(spec)/spec-1
+    lam_B, spec1d_B = twod.optimal_extract(spec)
+    
+    cc = nd.correlate1d(spec1d, kernel)
+    cc_B = nd.correlate1d(spec1d_B, kernel)
+    wavelen = lam[np.argmax(cc)] ## 1.083 um = He I !
+    peak = np.arange(np.argmax(cc)-4,np.argmax(cc)+8)
+    cc_peak = np.trapz(lam[peak]*cc[peak], lam[peak]) / np.trapz(cc[peak], lam[peak])
+    
+    plt.plot(lam[0:kernel.shape[0]], kernel/kernel.max()*2, label='Inverted blob (F105W)', linestyle='steps')
+    plt.plot(lam, spec1d, label='Blob spectrum (230, 418)', linestyle='steps')
+    plt.plot(lam, cc, label=r'cross-corr., peak = %.3f $\mu$m' %(cc_peak/1.e4))
+    
+    plt.plot(lam, spec1d_B, label='Blob spectrum (467, 377)', linestyle='steps')
+    
+    plt.legend(loc='upper left')
+    
+#
+def plot_F105W_backgrounds():
+    """
+    Check F105W backgrounds a a function of limb angle, etc.
+    """
+    os.chdir('/Users/brammer/WFC3/Backgrounds/BroadBand/F105W')
+    filter='G141'
+    alpha=0.2
+    
+    asns = glob.glob('*%s*orbit.png' %(filter))
+    colors = np.array(['blue', 'red', 'orange'])
+    #colors = np.array(['blue', 'white', 'orange'])
+    fig = unicorn.plotting.plot_init(xs=6, aspect=0.7, left=0.12, right=0.03, top=0.05)
+    ax = fig.add_subplot(111)
+    for i, asn in enumerate(asns):
+        root = asn.split('_')[0]
+        print i, root
+        # os.system('cat %s*%s*orbit.dat > /tmp/%s.dat' %(root[:6], filter, root))
+        # bg1 = catIO.Readfile('/tmp/%s.dat' %(root), save_fits=False, force_lowercase=False)
+        # bg_min = bg1.bg.min()
+        # min_string = 'visit minimum'
+        files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
+        bg_min = mywfc3.zodi.flt_zodi(gzfile(files[0].split('j_')[0]+'q_raw.fits'), verbose=False)
+        min_string = 'zodi prediction'
+        for file in files:
+            bg = catIO.Readfile(file, save_fits=False, force_lowercase=False)
+            cidx = bg.BrightLimb
+            cidx[(bg.BrightLimb == 0) & (bg.TermAng < 120)] = 2
+            #plt.scatter(bg.LimbAng, bg.bg-bg_min, c=colors[cidx], alpha=0.2, linestyle='-')
+            #plt.plot(bg.LimbAng, bg.bg-bg_min, alpha=0.2, color='black')
+            ### Don't or only show orbits where the limb changed during an exposure
+            # limb_changed = (np.diff(bg.BrightLimb)**2).max() > 0
+            # if limb_changed == 0:
+            #     continue
+            #
+            ok = bg.BrightLimb == 1
+            ax.plot(bg.LimbAng, bg.bg-bg_min, alpha=alpha/2., color='black')
+            term = ~ok & (bg.TermAng > 120)
+            ax.plot(bg.LimbAng[term], bg.bg[term]-bg_min, alpha=alpha, color='blue')
+            ax.plot(bg.LimbAng[ok], bg.bg[ok]-bg_min, alpha=alpha, color='red')
+            term = ~ok & (bg.TermAng < 120)
+            ax.plot(bg.LimbAng[term], bg.bg[term]-bg_min, alpha=alpha, color='green')
+    
+    xli = np.arange(10, 120)
+
+    ax.plot([-100,-100],[0,0], alpha=0.6, color='red', label='BrightLimb')
+    ax.plot([-100,-100],[0,0], alpha=0.6, color='blue', label='DarkLimb')
+    ax.plot([-100,-100],[0,0], alpha=0.6, color='green', label='Dark, TermAng < 120')
+    #
+    ax.plot(xli, 3.4564*10**(-0.06564*xli)*10, color='black', alpha=0.8, linewidth=4, label=r'STIS$\times$10 (ISR-98-21)')
+    ax.plot([40,40],[-2,5], linewidth=4, linestyle='--', alpha=0.6, color='black', label='LOW-SKY; BrightLimbAng > 40')
+    ax.legend(loc='upper right', prop={'size':10})
+    ylims = {'F110W':(-0.5,3.5), 'F125W':(-0.2,1), 'G141':(-0.5,3.5), 'F105W':(-0.5,3.5), 'F160W':(-0.2,1)}
+    ax.set_xlim(0,120); ax.set_ylim(ylims[filter])
+    ax.set_xlabel('LimbAng'); ax.set_ylabel('Excess background over %s' %(min_string))
+    ax.set_title(filter)
+    
+    unicorn.plotting.savefig(fig, '%s_backgrounds.pdf' %(filter))
+    
+    #########
+    axr = ax.twinx()
+    axr.set_ylim(np.array([-0.1,3.5])/0.65*100)
+    axr.set_ylabel('%')
+    
+    #unicorn.plotting.savefig(fig, '../../F105W_backgrounds.pdf')
+    
+    #### Color bright limb by Dec.
+    for asn in asns:
+        print root
+        root = asn.split('_')[0]
+        os.system('cat %s*orbit.dat > /tmp/%s.dat' %(root[:6], root))
+        bg1 = catIO.Readfile('/tmp/%s.dat' %(root), save_fits=False, force_lowercase=False)
+        bg_min = bg1.bg.min()
+        files=glob.glob('%s*orbit.dat' %(root[:6]))
+        for file in files:
+            bg = catIO.Readfile(file, save_fits=False, force_lowercase=False)
+            cidx = bg.BrightLimb
+            cidx[(bg.BrightLimb == 0) & (bg.TermAng < 120)] = 2
+            ok = bg.BrightLimb == 1
+            #plt.scatter(bg.LimbAng[ok], bg.bg[ok]-bg_min, c=np.abs(bg.DEC[ok]), vmin=0, vmax=90, alpha=0.2)
+            plt.scatter(bg.read[ok], bg.LimbAng[ok], c=bg.bg[ok]-bg_min, vmin=0, vmax=4, alpha=0.2)
+    #
+    plt.scatter(np.arange(90), np.arange(90)*0.+4, c=np.arange(90), vmin=0, vmax=90, alpha=0.5, s=80)
+    plt.xlim(0,120); plt.ylim(-1,5)
+    
+def geometry():
+    """
+    Simple plot to see how the orbit altitude compares to the surface of the earth
+    """
+    altitude = 550. # km
+    r_earth = 6371. # km
+    
+    x = np.arange(-r_earth, r_earth+0.1,10)
+    y = np.sqrt(r_earth**2-x**2)
+    x = np.append(x,-x)
+    y = np.append(y,-y)
+    
+    lw = 3
+    plt.plot(x,y, color='green', linewidth=lw)
+    plt.scatter(0,r_earth+altitude, zorder=10)
+    plt.ylim(-(r_earth+5*altitude), r_earth+5*altitude)
+    
+    phi = np.pi/2-np.arccos(r_earth/(r_earth+altitude))
+    xi, yi = np.cos(phi)*r_earth, np.sin(phi)*r_earth
+    plt.plot([0,xi], [0,yi], color='blue', linewidth=lw)
+    plt.plot([0,0], [0, r_earth], color='blue', linewidth=lw)
+    plt.plot([0,0], [r_earth, r_earth+altitude], color='red', linewidth=lw)
+    plt.plot([0, xi], [r_earth+altitude, yi], color='orange', linewidth=lw)
+    
+def ephem_geometry():
+    import ephem
+    import pyfits
+    import astropy.time
+    
+    jit = pyfits.open('ibp321020_jit.fits.gz')
+    exp = jit[2]
+    spt = pyfits.getheader(gzfile(exp.header['EXPNAME'][:-1]+'q_spt.fits'), 0)
+    
+    spt = pyfits.open(exp.header['EXPNAME'][:-1]+'q_spt.fits.gz')
+    t0 = astropy.time.Time(spt['PSTRTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+    dt = astropy.time.TimeDelta(50.0, format='sec')
+    
+    tab = exp.data
+    
+    hst = ephem.Observer()
+    hst.elev = 100. #550.e3
+    hst.lat = tab['Latitude'][0]/180.*np.pi
+    hst.lon = (tab['Longitude'][0]-360)/180*np.pi
+    hst.pressure = 0.
+    hst.date = ephem.Date(t0.iso)
+    
+    sun = ephem.Sun()
+    
+def compare_filters_1083():
+    """
+    Compare relative flux levels of the 1083 line in F098M, F105W, and F110W
+    """
+    import pysynphot as S
+    
+    hei = S.GaussianSource(1.e-16, 1.083e4, 20)
+    continuum = S.FlatSpectrum(23, fluxunits='ABMag')
+
+    for filter in ['F098M', 'F105W', 'F110W', 'F125W']:
+        bp = S.ObsBandpass('wfc3,ir,%s' %(filter.lower()))
+        obs_hei = S.Observation(hei, bp)
+        obs_cont = S.Observation(continuum, bp)
+        print '%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f' %(filter, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25))
+        
+        
+    bp = S.ObsBandpass('wfc3,ir,f098m')
+    obs_hei = S.Observation(hei, bp)
+    obs_cont = S.Observation(continuum, bp)
     
     
-    
+    zod = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
+    nz = zod.renorm(SB, S.units.VegaMag, S.ObsBandpass("V"))
+    bp = S.ObsBandpass('wfc3,ir,%s' %(FILTER.lower()))
+    obs = S.Observation(nz, bp)
     
