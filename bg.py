@@ -95,7 +95,8 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     # colors = ['blue'] * (len(jit_direct)-1)
     # colors.extend(['green'] * (len(jit_grism)-1))
     
-    fig = plt.figure(figsize=(12,6))
+    #fig = plt.figure(figsize=(12,6))
+    fig = unicorn.plotting.plot_init(xs=12, aspect=0.5)
     ax1 = fig.add_axes((0.05,0.09,0.6,0.28))
     
     ax3 = fig.add_axes((0.05,0.09+0.28,0.6,0.28))
@@ -230,8 +231,9 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     CS=map.nightshade(date, alpha=0.2, color='black')
     ax2.set_title(tstr.iso)
     
-    plt.savefig('%s_%s_orbit.png' %(asn[0], FILTER))
-    plt.close()
+    #plt.savefig('%s_%s_orbit.png' %(asn[0], FILTER))
+    unicorn.plotting.savefig(fig, '%s_%s_orbit.png' %(asn[0], FILTER))
+    #plt.close()
     
 def init_map(ax=None):
     import mpl_toolkits.basemap as bm
