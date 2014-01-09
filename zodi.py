@@ -31,7 +31,7 @@ def flt_zodi(image='ibhm04alq_flt.fits', verbose=True, pirzkal=False):
     lat, lng = helio_lat_lng(ra, dec, jd)
     
     if pirzkal:
-        return nor_zodi(lat,lng,filter=filter)
+        return nor_zodi(lat, lng, filter=filter)
     else:
         return compute_zodi(ra, dec, jd, FILTER=filter, verbose=verbose)
     #

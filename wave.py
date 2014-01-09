@@ -25,6 +25,14 @@ def check_vy22():
 
     blue = ['F098M', 'F105W', 'G102']
     
+    flat_file = {'G102':os.getenv('iref')+'/uc72113oi_pfl.fits', #F105W
+                 'G141':os.getenv('iref')+'/uc721143i_pfl.fits'} #F140W
+    
+    flat = {}
+    for key in flat_file.keys():
+        im = pyfits.open(flat_file[key])
+        flat[key] = im[1].data[5:-5, 5:-5]
+    
     for filter in images.keys():
         test = filter in blue
         band = 'blue'*test + 'red'*(not test)
@@ -32,28 +40,46 @@ def check_vy22():
         asn.exposures = [images[filter].split('_flt')[0]]
         asn.write(asn.product+'_asn.fits')
         im = pyfits.open('../RAW/'+images[filter])
-        if not os.path.exists(images[filter][:-3]):
-            im.writeto(images[filter].split('.gz')[0])
+        if filter in flat.keys():
+            im[1].data /= flat[key]
+            sky = pyfits.open('/Users/brammer/3DHST/Spectra/Work/CONF/sky.G141.set002.fits ')[0].data
+            #sky /= flat[key]
+            ratio = im[1].data/sky
+            #a = np.median(ratio)
+            #a = np.median(ratio[ratio < a*1.5])
+            yh, xh = np.histogram(ratio.flatten(), range=(0,10), bins=1000)
+            a = xh[1:][np.argmax(yh)]
+            bg = a
+            im[1].data -= a*sky
+        else:
+            bg = np.median(im[1].data)
+            im[1].data -= bg
+        #
+        print 'Background: %s %.4f' %(images[filter], bg)
+        #
+        #if not os.path.exists(images[filter][:-3]):
+        im.writeto(images[filter].split('.gz')[0], clobber=True)
     
-    files=glob.glob('*asn.fits')
+    files=glob.glob('Vy22%s-[br]*asn.fits' %(root))
     for file in files:
-        unicorn.reduce.interlace_combine(file.split('_asn')[0], growx=1, growy=1, pad=60, NGROW=0)
+        unicorn.reduce.interlace_combine(file.split('_asn')[0], growx=1, growy=1, pad=60, NGROW=100, view=False)
     
     #### determine shifts to make spectra smooth at the edges
-    shifts = {'Vy22-red-G141':(0,1), 'Vy22-blue-G102':(0,1)}
-    shifts = {'Vy22-off+x-red-G141':(0,1), 'Vy22-off+x-blue-G102':(0,1)}
-    shifts = {'Vy22-off-x-red-G141':(0,1), 'Vy22-off-x-blue-G102':(0,1)}
-    for root in shifts.keys():
-        im = pyfits.open(root+'_inter.fits', mode='update')
-        for ext in [1,2]:
-            for axis in [0,1]:
-                im[ext].data = np.roll(im[ext].data, shifts[root][axis], axis=axis)
-        #
-        im.flush()
+    # shifts = {'Vy22-red-G141':(0,1), 'Vy22-blue-G102':(0,1)}
+    # shifts = {'Vy22-off+x-red-G141':(0,1), 'Vy22-off+x-blue-G102':(0,1)}
+    # shifts = {'Vy22-off-x-red-G141':(0,1), 'Vy22-off-x-blue-G102':(0,1)}
+    # for root in shifts.keys():
+    #     im = pyfits.open(root+'_inter.fits', mode='update')
+    #     for ext in [1,2]:
+    #         for axis in [0,1]:
+    #             im[ext].data = np.roll(im[ext].data, shifts[root][axis], axis=axis)
+    #     #
+    #     im.flush()
         
     fig = unicorn.plotting.plot_init(xs=10, aspect=0.5, left=0.1, bottom=0.1, wspace=0, hspace=0)
-
-    new, sub = False, 211
+    
+    ### Run twice with old and new configuration files
+    #new, sub = False, 211
     new, sub = True, 212
     
     ax = fig.add_subplot(sub)
@@ -72,12 +98,13 @@ def check_vy22():
     for line in PNe_lines:
         ax.plot(np.ones(2)*line, [100,1.e5], color='black', alpha=0.5, linewidth=2)
     
-    ax.set_xlim(7400,1.75e4)
-    ax.set_ylim(300, 4.e4)
+    for ax in fig.axes:
+        ax.set_xlim(7400,1.68e4)
+        ax.set_ylim(300, 4.e4)
     
     ax.set_xlabel(r'$\lambda$')
     
-    unicorn.plotting.savefig(fig, 'Vy22_center.pdf')
+    unicorn.plotting.savefig(fig, 'Vy22_center_Fixed.pdf')
     
     ##### Full model
     root='Vy22-red'
@@ -103,7 +130,46 @@ def check_vy22():
     
     im = pyfits.open('%s-G141_inter.fits' %(root))
     
+
+def brightest(root='Vy22-red', N=10):
+    new=False
     
+    import numpy as np
+    import unicorn
+    
+    root='Vy22-red'
+    N=10
+    
+    if 'blue' in root:
+        direct='F105W'
+        grism='G102'
+    #
+    if 'red' in root:
+        direct='F140W'
+        grism='G141'
+    #
+    NGROW=135
+    files=glob.glob('%s-*asn.fits' %(root))
+    for file in files:
+        unicorn.reduce.interlace_combine(file.split('_asn')[0], growx=1, growy=1, pad=60, NGROW=NGROW, view=False)
+    #
+    os.system('rm *seg.fits *cat')
+    
+    unicorn.reduce.set_grism_config(grism=grism, chip=1, use_new_config=new, force=False)
+    model = unicorn.reduce.GrismModel(root, direct=direct, grism=grism, growx=1, growy=1)
+    
+    objects = model.objects[np.argsort(model.cat.mag)][:N]
+    for object in objects:
+        model.twod_spectrum(object, miny=-30, refine=False)
+        
+    objects = model.objects[np.argsort(model.cat.mag)][:N]
+    for object in objects:
+        sp = unicorn.reduce.Interlace2D('%s_%05d.2D.fits' %(root, object))
+        wave, flux = sp.optimal_extract(sp.im['SCI'].data-sp.im['CONTAM'].data)
+        sens = sp.im['SENS'].data    
+        yi = np.interp(1.5e4, wave, flux/sens)
+        plt.plot(wave, flux/sens/yi, color='blue', alpha=0.5, linewidth=3)
+        
 def get_vy22(root='Vy22-blue', new=False):
     import numpy as np
     import unicorn

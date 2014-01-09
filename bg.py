@@ -7,6 +7,8 @@ import pyfits
 import numpy as np
 import matplotlib.pyplot as plt
 
+import glob
+
 import astropy.time
 import astropy.units as u
 
@@ -15,6 +17,35 @@ import datetime
 from mywfc3.utils import gzfile
 import unicorn
 
+def cgs_to_rayleigh(flux_cgs=1.e-16, flux_cps=None, area=0.0164):
+    """
+    Convert CGS fluxes to Rayleighs
+    
+    flux has units erg/s/cm2
+    area is in arcsec**2
+    
+    flux_cps = e-/s per WFC3 pixel in F105W
+    
+    # Rayleigh: 106 photons/cm2/s/Sr, or 1.58x10-11/lambda(nm) W cm2/Sr, where lambda is the wavelength of the line in nanometers.
+    # 
+    # http://astro.wku.edu/strolger/UNITS.txt
+    
+    http://www.astronomy.ohio-state.edu/~pogge/Ast871/Notes/Rayleighs.pdf    
+    1 Rayleigh = 3.71546x10-14 / [wave_A] erg s-1 cm-2 arcsec-2
+        
+    F105W: 1.e-16 erg/s/cm2, 10A, 1.179 e/s
+    """
+    wavelen = 10830
+    # area_Sr = area*2.35044e-11 # Area in Sr
+    # flux_photon = flux_cgs/(1.986447e-8/wavelen)
+    # rayleigh = 106*flux_photon/area_Sr
+    
+    if flux_cps is not None:
+        flux_cgs = flux_cps/1.179*1.e-16
+        
+    rayleigh = flux_cgs/(3.715e-14/wavelen)/area
+    return rayleigh
+    
 def go():
     import mywfc3.bg
     
@@ -29,11 +60,20 @@ def go():
         mywfc3.bg.show_orbit_limbangle(asn = [root, root.replace('030', '040')])
     
     os.chdir('/Users/brammer/WFC3/Backgrounds/MultiAccum')
-    asn_files = glob.glob('*jit.fits*')
+    asn_files = glob.glob('*jif.fits*')
+    force = False
     for asn in asn_files:
-        root = asn.split('_jit')[0]
-        mywfc3.bg.show_orbit_limbangle(asn = [root])
-        
+        root = asn.split('_jif')[0]
+        if (len(glob.glob('%s_*orbit.png' %(root))) == 0) | force:
+            try:
+                mywfc3.bg.show_orbit_limbangle(asn = [root])
+            except ValueError:
+                pass
+        # try:
+        #     mywfc3.bg.show_orbit_limbangle(asn = [root])
+        # except:
+        #     pass
+            
     mywfc3.bg.show_orbit_limbangle(asn = ['ibhj44040'])
     
     ### Overall programs
@@ -41,14 +81,17 @@ def go():
     
     SKIP=True
     
-    asn_files = glob.glob('*asn.fits')
-    for asn in asn_files:
+    asn_files = glob.glob('*asn.fits*')
+
+    asn_files.sort()
+    for asn in asn_files[::-1]:
         root = asn.split('_asn')[0]
         png = glob.glob(root+'*orbit.*')
         if (len(png) > 0) & SKIP:
+            print root
             continue
         try:
-            mywfc3.bg.show_orbit_limbangle(asn = [root])
+            mywfc3.bg.show_orbit_limbangle(asn=[root])
         except:
             fp = open(root+'_orbit.failed','w')
             fp.write('---')
@@ -56,9 +99,140 @@ def go():
             
     #mywfc3.bg.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
 
-def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
+    #### Unzip grism files in /user/brammer/WFC3_Backgrounds/GrismPrograms
+    os.system('dfits *0_spt.fits |fitsort SPEC_1  |grep G1 | awk \'{print $1}\' > /tmp/log')   
+    files=np.loadtxt('/tmp/log', dtype=str)
+    for file in files:
+        asn = threedhst.utils.ASNFile(file.replace('spt','asn'))
+        for exp in asn.exposures:
+            print exp
+            os.system('gunzip %s*fits.gz' %(exp[:-1]))
+    #
+    gris_spt = np.loadtxt('/tmp/log', dtype=str)
+    files=glob.glob('*asn.fits')
+    asn_files = []
+    for file in files:
+        print file
+        if file.replace('asn','spt') in gris_spt:
+            asn_files.append(file)
+            
+      
+def compute_sun_zd(root='ibffa4ckq'):
+    from subprocess import Popen,PIPE
+    from threedhst import catIO
+    import ephem
+    
+    #head = pyfits.getheader(mywfc3.utils.gzfile('%s_raw.fits' %(root)))
+    #h1 = pyfits.getheader(mywfc3.utils.gzfile('%s_raw.fits' %(root)), ext=1)
+    #orbit = ascii.read('%sj_%s_orbit.dat' %(root[:-1], head['FILTER']))
+    #ra, dec = head['RA_TARG'], head['DEC_TARG']
+    
+    stdout, stderr = Popen('gethead -x 0 %s_raw.fits FILTER TIME-OBS DATE-OBS' %(root), shell=True, stdout=PIPE).communicate()
+    FILTER, TIME_OBS, DATE_OBS = stdout.split()
+    
+    orbit = catIO.Readfile('%sj_%s_orbit.dat' %(root[:-1], FILTER), save_fits=False)
+    
+    ### ignore time throughout exposure but account for position
+    d = ephem.date('%s %s' %(DATE_OBS.replace('-','/'), TIME_OBS))
+    hst = ephem.Observer()
+    hst.date = d
+
+    sun_zd = np.zeros(orbit.N)
+    sun_ha = sun_zd*0.
+    
+    for i in range(orbit.N):
+        sub_lon = orbit.longitude[i]*1
+        sub_lat = orbit.latitude[i]*1
+        #
+        lon = sub_lon*1
+        if lon > 180:
+            lon = lon-360
+        #
+        hst.lon = '%s' %(lon)
+        hst.lat = '%s' %(sub_lat)
+        hst.elev = 0
+        #
+        sun = ephem.Sun()
+        sun.compute(hst)
+        sun_alt = sun.alt/np.pi*180
+        sun_zd[i] = 90-sun_alt
+        sun_ha[i] = (hst.sidereal_time()-sun.ra)/2/np.pi*24
+        
+    #print '%.3f %.3f' %(sun_alt, head['SUN_ALT'])
+    return sun_zd, sun_ha
+    
+    if False:
+        files=glob.glob('*%s*orbit.dat' %('G1'))
+        for file in files:
+            print file
+            if os.path.exists(file.replace('dat', 'sun_zd')):
+                continue
+            #
+            sun_zd, sun_ha = mywfc3.bg.compute_sun_zd('%sq' %(file.split('j_')[0]))
+            np.savetxt(file.replace('dat', 'sun_zd'), sun_zd)
+            np.savetxt(file.replace('dat', 'sun_ha'), sun_ha)
+            
+def compute_hst_azimuth(sub_lat, sub_lon, root='ibffa4ckq'):
+    """
+    Compute azimuth for an HST observation, assuming the orbital 
+    parameters have already been extracted from the jitter files.
+    """
+    import mywfc3.utils
+    from astropy.io import ascii
+    import ephem
+    
+    head = pyfits.getheader(mywfc3.utils.gzfile('%s_raw.fits' %(root)))
+    #orbit = ascii.read('%sj_%s_orbit.dat' %(root[:-1], head['FILTER']))
+    ra, dec = head['RA_TARG'], head['DEC_TARG']
+    
+    d = ephem.date('%s %s' %(head['DATE-OBS'].replace('-','/'), head['TIME-OBS']))
+    hst = ephem.Observer()
+    hst.date = d
+    #lon = orbit['Longitude'][0]
+    lon = sub_lon*1
+    if lon > 180:
+        lon = lon-360
+    #
+    hst.lon = '%s' %(lon)
+    hst.lat = '%s' %(sub_lat)
+    hst.elev = 600.e3
+        
+    targ = ephem.star('Arcturus')
+    targ._ra, targ._dec = ra/180*np.pi, dec/180.*np.pi
+    targ._pmdec, targ._pmra, = 0, 0
+    targ.compute(hst)
+    
+    sun = ephem.Sun()
+    sun.compute(hst)
+    sun_zd = 90-sun.alt/np.pi*180
+    
+    az = targ.az/np.pi*180
+    return az
+    
+def compute_shadow(root='ib5x15vlq', save_fits=False):
+    
+    h = pyfits.getheader(root+'_raw.fits')
+    f = h['FILTER']
+    orbit = catIO.Readfile('%sj_%s_orbit.dat' %(root[:-1], f), save_fits=False)
+    asn = h['ASN_ID'].strip().lower()
+    jif = pyfits.open(gzfile('%s_jif.fits' %(asn)))
+    for ext in jif[1:]:
+        if ext.header['EXPNAME'] == root[:-1]+'j':
+            pstr = astropy.time.Time(ext.header['STARTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+            shadow_in = astropy.time.Time(ext.header['SHADOENT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+            shadow_out = astropy.time.Time(ext.header['SHADOEXT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
+            dt_in = (shadow_in-pstr).sec
+            dt_out = (shadow_out-pstr).sec
+            in_shadow = ((orbit.seconds <= dt_out) & (dt_out <= orbit.seconds.max())) | ((orbit.seconds >= dt_in) & (dt_in > 0))
+            #orbit = catIO.Readfile('%sj_%s_orbit.dat' %(root[:-1], f), save_fits=False)
+            orbit.addColumn('in_shadow', in_shadow*1)
+            orbit.write_text(orbit.filename)
+            
+def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
     
     import scipy.ndimage as nd
+    import mywfc3.utils
+    import mywfc3.zodi
     
     # os.chdir('/Users/brammer/WFC3/Jitter')
     
@@ -109,6 +283,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
         if i == 0:
             targname = spt['TARGNAME']
             ax3.text(0.5, 0.95, targname, ha='center', va='top', transform=ax3.transAxes)
+            zodi = mywfc3.zodi.flt_zodi(mywfc3.utils.gzfile(expname+'_raw.fits'), verbose=False)
         #
         #### Start/stop times
         pstr = astropy.time.Time(spt['PSTRTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
@@ -126,34 +301,17 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
         bright = ext.data['BrightLimb'] == 1
         ax1.plot(((pstr-tstr).sec + ext.data['Seconds'][bright])/60., ext.data['LimbAng'][bright], color=colors[i], linewidth=6, alpha=0.5)
         #
-        #day = ext.data['DayNight'] == 0
-        #plt.plot(((pstr-tstr).sec + ext.data['Seconds'][bright])/60., ext.data['LimbAng'][bright], color=colors[i], linewidth=12, alpha=0.1)
-        #
-        #plt.plot((pstr-tstr).sec + ext.data['Seconds'], ext.data['DayNight']*ext.data['TermAng'], color=colors[i], linewidth=3, linestyle=':')
-        #
-        #plt.plot((pstr-tstr).sec + ext.data['Seconds'], ext.data['DayNight']*20, color=colors[i], linewidth=5, alpha=0.1)
-        #
-        #### Show background level
-        #flt = pyfits.open('../Backgrounds/G141/FLT/%s_flt.fits.gz' %(expname))
-        # flt = pyfits.open('%s_flt.fits' %(expname))
-        # # if FLAT_FILE != flt[0].header['PFLTFILE']:
-        # #     FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), flt[0].header['PFLTFILE'].split('$')[1]))[1].data[5:-5, 5:-5]
-        # #     FLAT_FILE = flt[0].header['PFLTFILE']
-        # #
-        # flt[1].data /= FLAT_F140W
-        # xc, yc, NY = 707, 507, 100
-        # subim = flt[1].data[yc-NY:yc+NY, xc-NY:xc+NY]
-        # med_background = np.median(subim)
-        # ax3.plot(((pstr-tstr).sec + ext.data['Seconds'])/60., ext.data['LimbAng']*0+med_background, color=colors[i], linewidth=2)
         ima = pyfits.open(gzfile('%s_raw.fits' %(expname)))
         FILTER = ima[0].header['FILTER']
         time, ramp, reads = get_bg_ramp(ima)
         dt = np.diff(time)
         ok = dt > 24
         ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., (ramp/dt*2.5)[ok], color=colors[i], linewidth=2)
+        ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., ramp[ok]*0+zodi, color='black', linestyle='--', alpha=0.5)
         #
-        ##
+        ##  Get shadow information from the JIF file
         ## JIF Shadow
+        shadow_flag = ext.data['Seconds']*0
         if jif is not None:
             shadow_in = astropy.time.Time(jif[i].header['SHADOENT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
             shadow_out = astropy.time.Time(jif[i].header['SHADOEXT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
@@ -167,18 +325,37 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
             if (dt_out > 0) & (dt_out < time.max()):
                 yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*2.5)[ok])
                 ax3.scatter(((pstr-tstr).sec + dt_out)/60., yi, marker='o', s=40, color='red', alpha=0.8)
-                
+            #
+            in_shadow = ext.data['Seconds'] < -1
+            if (dt_in < 0) & (dt_out < 0):
+                if dt_out < dt_in:
+                    in_shadow = (ext.data['Seconds'] > -1)
+            #
+            if (dt_in > 0):
+                in_shadow = (ext.data['Seconds'] >= dt_in)
+            #
+            if (dt_out > 0):
+                in_shadow = (ext.data['Seconds'] <= dt_out)
+            #
+            #print in_shadow.sum(), dt_in, dt_out
+            #ax3.plot(((pstr-tstr).sec + ext.data['Seconds'][in_shadow])/60., ext.data['Seconds'][in_shadow]*0.+2, color='green')
+            shadow_flag[in_shadow] = 1
+            shadow_flag[~in_shadow] = 0
+            
         #### Make log
         idx = np.arange(len(time)-1)[ok]
         fp = open('%s_%s_orbit.dat' %(ext.header['EXPNAME'], FILTER), 'w')
         dtypes = {'E':'%.3f', 'D':'%.3f', 'I':'%d'}
-        line = '# name read  bg minbg'
+        line = '# name read  bg minbg zodi shadow'
         for c in ext.data.columns:
             line += ' %s' %(c.name)
         fp.write(line+'\n')
         
         for il in idx:
-            line = '%s_%02d %2d %.3f %.3f' %(ext.header['EXPNAME'], il, il, ramp[il]/dt[il]*2.5, np.min((ramp/dt*2.5)[ok]))
+            line = '%s_%02d %2d %.3f %.3f %.3f' %(ext.header['EXPNAME'], il, il, ramp[il]/dt[il]*2.5, np.min((ramp/dt*2.5)[ok]), zodi)
+            #
+            shadow = np.interp(time[1:][il]-dt[il]/2., ext.data['Seconds'], shadow_flag)
+            line += ' %d' %(shadow)
             for c in ext.data.columns:
                 val = np.interp(time[1:][il]-dt[il]/2., ext.data['Seconds'], ext.data[c.name])
                 line += ' ' + dtypes[c.format] %(val) # %(str(np.cast[dtypes[c.format]](val)))
@@ -215,7 +392,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     ax3.set_xlim(-10, xl[1])
     #ax3.legend(loc='upper left', prop={'size':8})
     
-    ax3.set_ylim(0,3.8)
+    ax3.set_ylim(0,ymax)
     ax3.set_xticklabels([])
     ax3.set_ylabel('backg (electrons/s)')
     ax2 = fig.add_axes((0.66,0.14,0.33,0.4))
@@ -223,7 +400,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060']):
     
     map = init_map(ax=ax2)
     for i, ext in enumerate(jit):
-        draw_map_latlon(map, ext.data['Latitude'], ext.data['Longitude'], color=colors[i], linewidth=2)
+        draw_map_latlon(map, ext.data['Latitude'], ext.data['Longitude'], color=colors[i], linewidth=2, ext=ext)
         
     tt = np.cast[int](tstr.iso.replace('-',' ').replace(':',' ').replace('.', ' ').split())
     
@@ -262,7 +439,7 @@ def init_map(ax=None):
     #
     return map
     
-def draw_map_latlon(map, lat, lon, *args, **kwargs):
+def draw_map_latlon(map, lat, lon, ext=None, *args, **kwargs):
     w = lon < 180
     e = lon >= 180
     xpt, ypt = map(lon[w], lat[w])
@@ -271,6 +448,15 @@ def draw_map_latlon(map, lat, lon, *args, **kwargs):
     map.plot(xpt, ypt, alpha=0.5, **kwargs)
     xpt, ypt = map(lon[0], lat[0])
     map.scatter(xpt, ypt, alpha=0.5, **kwargs)
+    if ext is not None:
+        root = ext.header['EXPNAME'][:-1]+'q'
+        az = compute_hst_azimuth(lat[0], lon[0], root=root)
+        #print az
+        dx = np.cos((90-az)/180*np.pi)
+        dy = np.sin((90-az)/180*np.pi)
+        xpt2, ypt2 = map(lon[0]+dx*10, lat[0]+dy*10)
+        map.plot([xpt, xpt2], [ypt, ypt2], color='red')
+        
     #date = datetime.utcnow()
     #CS=m.nightshade(date, alpha=0.2, color='black')
     
@@ -342,9 +528,13 @@ def test_ramp(root='ibhj20x7q'):
     fit0 = polyval(c[-2:], time[1:])
     plt.plot(time[1:], fit0, color='red')
     
-def split_multiaccum(ima):
+def split_multiaccum(ima, scale_flat=True):
     
-    FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+    if scale_flat:
+        FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+    else:
+        FLAT_F140W = 1.
+            
     #FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), ima[0].header['PFLTFILE'].split('$')[1]))[1].data
     
     NSAMP = ima[0].header['NSAMP']
@@ -613,26 +803,17 @@ def plot_F105W_backgrounds():
         # bg_min = bg1.bg.min()
         # min_string = 'visit minimum'
         files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
-        bg_min = mywfc3.zodi.flt_zodi(gzfile(files[0].split('j_')[0]+'q_raw.fits'), verbose=False)
+        #bg_min = mywfc3.zodi.flt_zodi(gzfile(files[0].split('j_')[0]+'q_raw.fits'), verbose=False)
         min_string = 'zodi prediction'
         for file in files:
             bg = catIO.Readfile(file, save_fits=False, force_lowercase=False)
-            cidx = bg.BrightLimb
-            cidx[(bg.BrightLimb == 0) & (bg.TermAng < 120)] = 2
-            #plt.scatter(bg.LimbAng, bg.bg-bg_min, c=colors[cidx], alpha=0.2, linestyle='-')
-            #plt.plot(bg.LimbAng, bg.bg-bg_min, alpha=0.2, color='black')
-            ### Don't or only show orbits where the limb changed during an exposure
-            # limb_changed = (np.diff(bg.BrightLimb)**2).max() > 0
-            # if limb_changed == 0:
-            #     continue
+            bg_min = bg.zodi
             #
-            ok = bg.BrightLimb == 1
+            ok = bg.shadow == 1
             ax.plot(bg.LimbAng, bg.bg-bg_min, alpha=alpha/2., color='black')
-            term = ~ok & (bg.TermAng > 120)
-            ax.plot(bg.LimbAng[term], bg.bg[term]-bg_min, alpha=alpha, color='blue')
-            ax.plot(bg.LimbAng[ok], bg.bg[ok]-bg_min, alpha=alpha, color='red')
-            term = ~ok & (bg.TermAng < 120)
-            ax.plot(bg.LimbAng[term], bg.bg[term]-bg_min, alpha=alpha, color='green')
+            ax.plot(bg.LimbAng[ok], (bg.bg-bg_min)[ok], alpha=alpha, color='blue')
+            ax.plot(bg.LimbAng[~ok & (bg.BrightLimb == 1)], (bg.bg-bg_min)[~ok & (bg.BrightLimb == 1)], alpha=alpha, color='red')
+            ax.plot(bg.LimbAng[~ok & ~(bg.BrightLimb == 1)], (bg.bg-bg_min)[~ok & ~(bg.BrightLimb == 1)], alpha=alpha, color='green')
     
     xli = np.arange(10, 120)
 
@@ -676,6 +857,325 @@ def plot_F105W_backgrounds():
     plt.scatter(np.arange(90), np.arange(90)*0.+4, c=np.arange(90), vmin=0, vmax=90, alpha=0.5, s=80)
     plt.xlim(0,120); plt.ylim(-1,5)
     
+    #
+    bg = catIO.Readfile('master.dat', force_lowercase=False, save_fits=False)
+    s = bg.shadow == 1
+    b = bg.BrightLimb == 1
+    
+    plt.scatter(bg.LimbAng[~s], (bg.bg-bg.zodi)[~s], alpha=0.1)
+    
+    sun = np.zeros(bg.N)
+    for i in range(bg.N):
+        sun[i] = sun_angle['%sq' %(bg.name[i].split('j_')[0])]
+    #
+    vmax=140
+    
+    plt.scatter(bg.LimbAng[~s], (bg.bg/bg.zodi)[~s], alpha=0.5, c=sun[~s], vmin=45, vmax=vmax)
+    plt.ylim(0,10); plt.xlim(0,120); plt.ylabel('BG / zodi')
+    cb = plt.colorbar(); cb.set_label('Sun angle')
+    plt.savefig('ShadowFalse.png')
+    
+    plt.scatter(bg.LimbAng[s], (bg.bg/bg.zodi)[s], alpha=0.5, c=sun[s], vmin=45, vmax=vmax)
+    plt.ylim(0,10); plt.xlim(0,120); plt.ylabel('BG / zodi')
+    cb = plt.colorbar(); cb.set_label('Sun angle')
+    plt.savefig('ShadowTrue.png')
+    
+def sunangle(filter='F105W', alpha=0.2):
+    import mywfc3.bg
+    from threedhst import catIO
+    import cPickle as pickle
+    import scipy
+    
+    asns = glob.glob('*%s*orbit.png' %(filter))
+    fp = open('f105w_sun_coords.pkl','rb')    
+    sun_angle = pickle.load(fp)
+    fp.close()
+    
+    ###### Figure of tracks colored by sun angle
+    la, ra, ta, ba = 0.06, 0.1, 0.03, 0.13
+    fig = unicorn.plotting.plot_init(xs=8, aspect=0.4, left=0.01, right=0.01, top=0.01, bottom=0.01, wspace=0, hspace=0, NO_GUI=True, use_tex=True)
+    
+    master = {131:{'label':'Shadow', 's':1, 'b':0},
+              132:{'label':'In sunlight, dark limb', 's':0, 'b':0},
+              133:{'label':'In sunlight, bright limb', 's':0, 'b':1}}
+              
+    axes = []
+    dx = (1-la-ra)/3.
+    for i, key in enumerate(master.keys()):
+        ax = fig.add_axes((la+dx*i, ba, dx, 1-ba-ta))
+        axes.append(ax)
+    
+    for i, asn in enumerate(asns):
+        root = asn.split('_')[0]
+        print i, root
+        files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
+        min_string = 'zodi prediction'
+        for file in files:
+            bg = catIO.Readfile(file, save_fits=False, force_lowercase=False)
+            bg_min = bg.zodi
+            ### Correction for shadow zodi as a function of sun angle
+            sun_ang = sun_angle['%sq' %(bg.name[0].split('j_')[0])]
+            p = np.array([ -3.69229110e-10,   2.39078911e-07,  -5.86843639e-05, 6.75812691e-03,  -3.62093498e-01,   8.16467389e+00])
+            bg_min *= scipy.polyval(p, sun_ang)
+            #
+            ok = bg.shadow == 1
+            for j, key in enumerate(master.keys()):
+                ax = axes[j]
+                idx = (bg.shadow == master[key]['s']) & (bg.BrightLimb == master[key]['b'])
+                yFlux, Ylabel = (bg.bg/bg_min), 'Background / zodi prediction'
+                #yFlux, Ylabel = (bg.bg - bg_min), 'Background - zodi prediction'
+                sun_ha = np.loadtxt(file.replace('dat','sun_ha')) #, 'SUN ZD'
+                #
+                xAngle, Alabel, xr = bg.LimbAng, 'LimbAng', (10,119)
+                #xAngle, Alabel, xr = bg.LOS_Zenith, 'LOS Zenith', (1,100)
+                #xAngle, Alabel, xr = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (1,178)
+                xAngle, Alabel, xr = sun_ha, 'Solar HA', (-14, 14)
+                #idx = idx & (sun_ha < -2)
+                ax.plot(xAngle, yFlux, color='black', alpha=0.03)
+                if idx.sum() > 0:
+                    #color_index, Clabel, vc = np.ones(bg.N)[idx]*sun_ang, 'Target-Sun Angle', (45, 140)
+                    color_index, Clabel, vc = bg.LOS_Zenith[idx], 'LOS Zenith', (1,100)
+                    ## color_index, Clabel, vc = np.loadtxt(file.replace('dat','sun_zd'))[idx], 'SUN ZD', (45,140)
+                    #color_index, Clabel, vc = sun_ha[idx], 'Solar Hour Angle', (-5,5)
+                    
+                    mywfc3.bg.color_lines(xAngle[idx], yFlux[idx], color_index, alpha=alpha, linewidth=1.2, ax=ax, vmin=vc[0], vmax=vc[1], cmap='jet', clip_dx=5)
+    
+    for j, key in enumerate(master.keys()):
+        axes[j].plot([0,200], np.ones(2)*('/' in Ylabel), color='white', linewidth=3, alpha=0.8)
+        axes[j].plot([0,200], np.ones(2)*('/' in Ylabel), color='black', linewidth=1.3, alpha=0.8, linestyle='--')
+        axes[j].set_xlim(xr); axes[j].set_ylim(-0.5,5)
+        axes[j].set_xlabel(Alabel)
+        axes[j].text(0.5, 0.95, master[key]['label'], ha='center', va='top', transform=axes[j].transAxes)
+            
+    #
+    s = axes[0].scatter(np.ones(2),np.ones(2)*1000, c=vc, vmin=vc[0], vmax=vc[1], alpha=0.5)
+    cax = fig.add_axes(((1-ra)+ra/10., ba, ra/4., 1-ta-ba))
+    cb = fig.colorbar(s, cax=cax)
+    cb.set_label(Clabel)
+    
+    ### Ylog
+    if '/' in Ylabel:
+        for j, key in enumerate(master.keys()):
+            axes[j].semilogy()
+            axes[j].set_ylim(0.7,15)
+        
+        axes[0].set_yticklabels([1,10])
+        axes[0].set_yticks([1,10])
+        
+    axes[0].set_ylabel(Ylabel)
+    for i in range(1,3):
+        axes[i].set_yticklabels([])
+    
+    unicorn.plotting.savefig(fig, 'F105W_background_SunAngle.pdf', increment=True)
+    
+    if False:
+        #### Look into offset of shadow zodi / obs as a function of sun angle
+        bgf = catIO.Readfile('master.dat', force_lowercase=False, save_fits=False)
+        sun_zd = np.loadtxt('master.sun_zd')
+        sun_ha = np.loadtxt('master.sun_ha')
+        sun_a = np.zeros(bgf.N)
+        for i in range(bgf.N):
+            print i
+            sun_a[i] = sun_angle['%sq' %(bgf.name[i].split('j_')[0])]
+        
+        #
+        shadow = sun_zd > 130
+        plt.scatter(sun_a[shadow], (bgf.bg/bgf.zodi)[shadow], alpha=0.1)
+        p = scipy.polyfit(sun_a[shadow], (bgf.bg/bgf.zodi)[shadow], 5)
+        xarr = np.arange(0,180)
+        plt.plot(xarr, scipy.polyval(p, xarr))
+        #
+        ### Check for difference with morning and twilight (hour angle)
+        in_sun = sun_zd <  100
+        plt.scatter(sun_zd[in_sun], (bgf.bg/bgf.zodi)[in_sun], c=sun_a[in_sun], vmin=45, vmax=140, alpha=0.1)
+
+        plt.scatter(sun_zd[in_sun], (bgf.bg/bgf.zodi)[in_sun], c=sun_ha[in_sun], vmin=-5, vmax=5, alpha=0.4)
+        plt.colorbar()
+
+
+def single_sunangle(filter='F105W', alpha=0.2, log=False):
+    import mywfc3.bg
+    from threedhst import catIO
+    import cPickle as pickle
+    import scipy
+    
+    asns = glob.glob('*%s*orbit.png' %(filter))
+    asns.sort()
+    fp = open('f105w_sun_coords.pkl','rb')    
+    sun_angle = pickle.load(fp)
+    fp.close()
+    
+    ###### Figure of tracks colored by sun angle
+    aspect, la, ra, ta, ba = 0.7, 0.06, 0.11, 0.02, 0.08
+    aspect, la, ra, ta, ba = 0.5, 0.06, 0.105, 0.02, 0.105
+
+    fig = unicorn.plotting.plot_init(xs=7, aspect=aspect, left=0.01, right=0.01, top=0.01, bottom=0.01, wspace=0, hspace=0, NO_GUI=True, use_tex=True)
+    
+    ax = fig.add_axes((la, ba, 1-la-ra, 1-ba-ta))
+    
+    p = {}
+    
+    p['F105W'] = np.array([ -3.69229110e-10,   2.39078911e-07,  -5.86843639e-05, 6.75812691e-03,  -3.62093498e-01,   8.16467389e+00])
+    p['F125W'] = np.array([ -3.69229110e-10,   2.39078911e-07,  -5.86843639e-05, 6.75812691e-03,  -3.62093498e-01,   8.16467389e+00])
+    
+    #### M31 WISP
+    bad_visits = ['ibtt69', 'ibtt70', 'ibtt71', 'ibtt72', 'ibtt73', 'ibtt74', 'ibtt75', 'ibtt76', 'ibtt77', 'ibtt78', 'ibtt79', 'ibtt80', 'ibtt81', 'ibtt82', 'ibtt83', 'ibtt84', 'ibtt98', 'ibtt1s', 'ibtt1t', 'ibtt1u', 'ib8ceo', 'ib8cep']
+    
+    #### WISP extremely bright star (H=7)
+    bad_visits.extend(['ic3t85', 'ic3t86', 'ic3t87', 'ic3t88', 'ic3t89'])
+    for i, asn in enumerate(asns[:]):
+        root = asn.split('_')[0]
+        if root[:6] in bad_visits:
+            continue
+        #
+        print i, root
+        files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
+        min_string = 'zodi prediction'
+        for file in files:
+            bg = catIO.Readfile(file, save_fits=False, force_lowercase=False)
+            bg_min = bg.zodi
+            ### Correction for shadow zodi as a function of sun angle
+            sun_ang = sun_angle['%sq' %(bg.name[0].split('j_')[0])]
+            #bg_min *= scipy.polyval(p[filter], sun_ang)
+            #
+            yFlux, Ylabel = (bg.bg - bg_min), 'Background - zodi prediction, e-/s'
+            if log:
+                yFlux, Ylabel = (bg.bg/bg_min), 'Background / zodi prediction'
+        
+            sun_ha = np.loadtxt(file.replace('dat','sun_ha')) #, 'SUN ZD'
+            sun_ha[sun_ha < -12] += 24 #-sun_ha[sun_ha < -12]-24
+            sun_ha[sun_ha > 12] -= 24 #-sun_ha[sun_ha > -12]+24
+            # print file, np.diff(sun_ha).min(), np.diff(sun_ha).max()   
+            #xAngle, Alabel, xr = bg.LimbAng, 'LimbAng', (10,119)
+            #ok = bg.shadow == 0
+            #xAngle, Alabel, xr = bg.LOS_Zenith, 'LOS Zenith', (1,100)
+            #xAngle, Alabel, xr = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (1,178)
+            xAngle, Alabel, xr = sun_ha, 'Subpoint Solar HA (hours)', (-12,12)
+            ok = xAngle > -1000
+            #### Remove some dense clusters
+            if filter == 'F125W':
+               ok = ok & (yFlux < 1.6*(1+0.56*('d / z' in Ylabel)))
+            #ok = (bg.LimbAng >= 40) & (bg.shadow == 1)
+            #
+            #ax.plot(xAngle, yFlux, color='black', alpha=0.03)
+            if ok.sum() == 0:
+                continue
+            
+            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], yFlux[ok]*0, alpha=0.05, linewidth=1.2, ax=ax, vmin=0, vmax=1, cmap='gray', clip_dx=5)
+            #
+            ### Colored line segment
+            #color_index, Clabel, vc = np.ones(bg.N)*sun_ang, 'Target-Sun Angle', (45, 140)
+            #color_index, Clabel, vc = bg.LOS_Zenith, 'LOS Zenith', (1,100)
+            color_index, Clabel, vc = bg.LimbAng, 'Limb Angle', (15,100)
+            ## color_index, Clabel, vc = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (45,140)
+            #color_index, Clabel, vc = sun_ha, 'Solar Hour Angle', (-5,5)
+            
+            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], color_index[ok], alpha=alpha, linewidth=1.2, ax=ax, vmin=vc[0], vmax=vc[1], cmap='jet', clip_dx=5)
+    
+    ax.plot([-200,200], np.ones(2)*('d / z' in Ylabel), color='white', linewidth=3, alpha=0.8)
+    ax.plot([-200,200], np.ones(2)*('d / z' in Ylabel), color='black', linewidth=1.3, alpha=0.8, linestyle='--')
+    ax.set_xlim(xr); ax.set_ylim(-0.5,6)
+    ax.set_xlabel(Alabel)
+            
+    #
+    s = ax.scatter(np.ones(2),np.ones(2)*1000, c=vc, vmin=vc[0], vmax=vc[1], alpha=0.5)
+    cax = fig.add_axes(((1-ra)+ra/10., ba, ra/4., 1-ta-ba))
+    cb = fig.colorbar(s, cax=cax)
+    cb.set_label(Clabel)
+    
+    yshade = [5,20,5.2,5.6]
+    ### Ylog
+    if 'd / z' in Ylabel:
+        ax.semilogy()
+        ax.set_ylim(0.7,15)
+        
+        ax.set_yticklabels([1,2,5,10])
+        ax.set_yticks([1,2,5,10])
+        yshade = [9,20,10,12]
+        
+    ax.set_ylabel(Ylabel) # + ', %s' %(filter))
+    ax.text(0.1, 0.7, filter, size=16, ha='left', va='bottom', transform=ax.transAxes)
+    
+    if 'HA' in Alabel:
+        ax.fill_between([-14,-8], np.ones(2)*yshade[0], np.ones(2)*yshade[1], color='0.2', alpha=0.5)
+        ax.text(-9, yshade[2], 'Shadow', ha='right', va='bottom')
+        ax.fill_between([8,14], np.ones(2)*yshade[0], np.ones(2)*yshade[1], color='0.2', alpha=0.5)
+        ax.text(9, yshade[2], 'Shadow', ha='left', va='bottom')
+        
+        ax.fill_between([-8,-5], np.ones(2)*yshade[0], np.ones(2)*yshade[1], color='0.6', alpha=0.5)
+        ax.text(-5.5, yshade[2], 'Dawn', ha='right', va='bottom')
+        ax.fill_between([5,8], np.ones(2)*yshade[0], np.ones(2)*yshade[1], color='0.6', alpha=0.5)
+        ax.text(5.5, yshade[2], 'Dusk', ha='left', va='bottom')
+
+        ax.text(0, yshade[2], 'Day', ha='center', va='bottom')
+        ax.text(0, yshade[3], r'\textit{HST} in ', ha='center', va='bottom')
+        
+    unicorn.plotting.savefig(fig, filter+'_background_SunAngle_single.pdf', increment=True)
+    
+       
+def color_lines(x, y, z, vmin=0, vmax=1, alpha=1, linewidth=2, cmap='spectral', clip_dx=None, ax=None):
+    """
+    Color line segments x vs y using the array `z`, normalized to (vmin,vmax)
+    
+    http://wiki.scipy.org/Cookbook/Matplotlib/MulticoloredLine
+    """
+    import matplotlib.collections
+    
+    points = np.array([x, y]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    
+    if clip_dx is not None:
+        dx = segments[:,1,0]-segments[:,0,0]
+        clip = np.abs(dx) < clip_dx
+        if clip.sum() == 0:
+            return False
+        
+        segments = segments[clip,:,:]
+        
+    lc = matplotlib.collections.LineCollection(segments, cmap=plt.get_cmap(cmap), norm=plt.Normalize(vmin, vmax))
+    lc.set_array(z)
+    lc.set_linewidth(linewidth)
+    lc.set_alpha(alpha)
+    if ax is None:
+        ax = plt.gca()
+    #
+    ax.add_collection(lc)
+    
+#### Sun angle
+def get_sun_angle():
+    """
+    Get SUN coords from SPT file
+    
+    dfits *q_spt.fits |fitsort PSTRTIME UTC0 RA_TARG DEC_TARG RA_SUN DEC_SUN > sun_coords.dat
+    """
+    import pyfits
+    import astropy.coordinates as c
+    import astropy.units as u
+    import cPickle as pickle
+    
+    #h = pyfits.getheader(spt)
+    
+    sun = catIO.Readfile('sun_coords.dat', save_fits=False, force_lowercase=False)
+    sun_angle = {}
+    
+    for i in range(sun.N):
+        print i
+        key = sun.FILE[i].split('_spt')[0]
+        ra, dec = sun.RA_TARG[i], sun.DEC_TARG[i]
+        ra_sun, dec_sun = sun.RA_SUN[i], sun.DEC_SUN[i]
+        c_targ = c.ICRSCoordinates(ra, dec, unit=(u.deg, u.deg))
+        c_sun = c.ICRSCoordinates(ra_sun, dec_sun, unit=(u.deg, u.deg))
+        sun_angle[key] = c_targ.separation(c_sun).value
+    #
+    fp = open('f105w_sun_coords.pkl','wb')
+    pickle.dump(sun_angle, fp)
+    fp.close()
+
+    fp = open('f105w_sun_coords.pkl','rb')    
+    sun_angle = pickle.load(fp)
+    fp.close()
+    
+    
 def geometry():
     """
     Simple plot to see how the orbit altitude compares to the surface of the earth
@@ -699,6 +1199,21 @@ def geometry():
     plt.plot([0,0], [0, r_earth], color='blue', linewidth=lw)
     plt.plot([0,0], [r_earth, r_earth+altitude], color='red', linewidth=lw)
     plt.plot([0, xi], [r_earth+altitude, yi], color='orange', linewidth=lw)
+    
+    #### Height of shadow at horizon and zenith as a function of solar depression angle
+    #### from the earth surface
+    alpha = np.arange(0,90.,1.) # 90 - depression angle
+    theta = (180-(90-alpha))/2.
+    h_horizon = r_earth * (1./np.sin(theta/180.*np.pi)-1)
+    h_zenith = r_earth * (1./np.sin(alpha/180.*np.pi)-1)
+    
+    plt.plot(90-alpha, h_horizon, label='h_horiz')
+    plt.plot(90-alpha, h_zenith, label='h_zenith')
+    plt.plot([0,90], np.ones(2)*altitude, label='HST')
+    plt.semilogy()
+    plt.legend(loc='upper left')
+    
+    
     
 def ephem_geometry():
     import ephem
