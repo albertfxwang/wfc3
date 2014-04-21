@@ -69,7 +69,7 @@ def compute_zodi(ra, dec, jd, FILTER='F140W', verbose=False):
     return obs.countrate()+thermal[FILTER]
     
     
-def helio_lat_lng(ra, dec, jd):
+def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     import ephem
     import cPickle as pickle
     #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
@@ -82,6 +82,10 @@ def helio_lat_lng(ra, dec, jd):
     ra_sun = np.interp(jd, hjd, hra)
     dec_sun = np.interp(jd, hjd, hdec)
     
+    if fits is not None:
+        head = pyfits.getheader(fits, ext=0)
+        ra, dec, jd = head['RA_TARG'], head['DEC_TARG'], head['EXPSTART']
+        
     #return dec-sun_dec, ra-sun_ra
     
     #ra, dec = 34.440618, -5.1721396

@@ -84,7 +84,7 @@ def go():
     asn_files = glob.glob('*asn.fits*')
 
     asn_files.sort()
-    for asn in asn_files[::-1]:
+    for asn in asn_files:
         root = asn.split('_asn')[0]
         png = glob.glob(root+'*orbit.*')
         if (len(png) > 0) & SKIP:
@@ -97,6 +97,21 @@ def go():
             fp.write('---')
             fp.close()
             
+    #### "naked" exposures
+    files = glob.glob('*[a-z]j_jit.fits')
+    asn = threedhst.utils.ASNFile('ic8n01020_asn.fits')
+    for file in files:
+        asn.exposures = [file.split('j_')[0]+'q']
+        asn.product = asn.exposures[0].upper()
+        root=file.split('_j')[0]
+        png = glob.glob(root+'*orbit.*')
+        if (len(png) > 0) & SKIP:
+            print root
+            continue
+        #
+        asn.write(root+'_asn.fits')
+        mywfc3.bg.show_orbit_limbangle(asn=[root])
+        
     #mywfc3.bg.show_orbit_limbangle(asn = ['ibhj20030', 'ibhj20040'])
 
     #### Unzip grism files in /user/brammer/WFC3_Backgrounds/GrismPrograms
@@ -384,7 +399,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
             ax_im.set_xlim(0,1014); ax_im.set_ylim(0,1014)
             
     ax1.set_xlabel(r'$\Delta t$ (minutes)')
-    ax1.set_ylabel('JIT: LimbAng')
+    ax1.set_ylabel('LimbAng')
     ax1.set_ylim(0,99)
     xl = ax1.get_xlim()
     ax1.plot([-10,xl[1]], [20,20], linestyle=':')
@@ -499,7 +514,7 @@ def test_ramp(root='ibhj20x7q'):
         
     #sky = cube[:,:,:] - np.median(ok_samp, axis=0)*np.arange(1,NSAMP+1) #*NSAMP #*np.diff(time)[-1]
     for i in range(NSAMP-1):
-        ds9.view((sky[i,:,:])/dt)
+        ds9.view((sky[i,:,:]))
         
     sky0 = 0.
     for i in range(NSAMP-2):
@@ -534,7 +549,10 @@ def split_multiaccum(ima, scale_flat=True):
         FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
     else:
         FLAT_F140W = 1.
-            
+    
+    if ('ima' in ima.filename()) & (ima[0].header['FLATCORR'] == 'COMPLETE'):
+        FLAT_F140W = 1
+        
     #FLAT_IMAGE = pyfits.open(os.path.join(os.getenv('iref'), ima[0].header['PFLTFILE'].split('$')[1]))[1].data
     
     NSAMP = ima[0].header['NSAMP']
@@ -552,6 +570,32 @@ def split_multiaccum(ima, scale_flat=True):
     
     return cube, time, NSAMP
 
+def evaluate_bg_sn(raw='ib3712lyq_raw.fits', npix=4):
+    """
+    Plot S/N as a function of time for different source counts
+    """
+    from threedhst import catIO
+    import glob
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    s = 1 # e/s
+    bg = catIO.Readfile(glob.glob('%sj_*_orbit.dat' %(raw.split('q_')[0]))[0], save_fits=False)
+    
+    dt = np.ones(bg.N)*100
+    t = np.cumsum(dt)
+    RN = 20
+    
+    signal = np.cumsum(s*dt)
+    var = npix*RN**2 + np.cumsum((s+npix*bg.bg)*dt)
+    var_zodi = npix*RN**2 + np.cumsum((s+npix*bg.zodi)*dt)
+    SN = signal/np.sqrt(var)
+    SN_zodi = signal/np.sqrt(var_zodi)
+    plt.plot(t, SN/SN[3], label=raw.split('_')[0])
+    plt.plot(t, SN_zodi/SN[3], color='black', linestyle='--')
+        
+    print np.ptp(bg.bg[1:])
+    
 ### 2D surface http://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-order-dependent
 import itertools
 import numpy as np
@@ -879,6 +923,55 @@ def plot_F105W_backgrounds():
     plt.ylim(0,10); plt.xlim(0,120); plt.ylabel('BG / zodi')
     cb = plt.colorbar(); cb.set_label('Sun angle')
     plt.savefig('ShadowTrue.png')
+
+def show_with_f10(log=False):
+    """ 
+    Make plots of LimbAngle vs background excess colored by Solar 10.7cm Flux
+    """   
+    import mywfc3.bg
+    from threedhst import catIO
+    import cPickle as pickle
+    import scipy
+    
+    ###### Figure of tracks colored by sun angle
+    cmap = 'cool'
+    cmap = 'RdYlGn_r'
+    
+    la, ra, ta, ba = 0.06, 0.1, 0.03, 0.13
+    fig = unicorn.plotting.plot_init(xs=8, aspect=0.4, left=0.01, right=0.01, top=0.01, bottom=0.01, wspace=0, hspace=0, NO_GUI=True, use_tex=True)
+        
+    axes=[]
+    dx = (1-la-ra)/3.
+    for i in range(3):
+        ax = fig.add_axes((la+dx*i, ba, dx, 1-ba-ta))
+        axes.append(ax)
+    #
+    cax = fig.add_axes(((1-ra)+ra/10., ba, ra/4., 1-ta-ba))
+    
+    filters = ['F105W','G102','G141']
+    #filters = ['F105W']
+    os.chdir('/user/brammer/WFC3_Backgrounds/F105W')
+    #filters = ['F125W','G102','G141']
+    #os.chdir('/user/brammer/WFC3_Backgrounds/F125W')
+    for i in range(len(filters)):
+        if filters[i].startswith('G'):
+            os.chdir('../GrismPrograms')
+        #
+        ax = fig.axes[i]
+        mywfc3.bg.single_sunangle(filter=filters[i], alpha=0.2, log=log, ax=ax, cax=cax, cmap=cmap)
+        ax.text(0.95, 0.95, filters[i], size=13, ha='right', va='top', transform=ax.transAxes)
+        
+    #
+    Clabel, vc = 'Solar 10.7 cm flux (sfu)', (70,160)
+    s = ax.scatter(np.ones(2),np.ones(2)*1000, c=vc, vmin=vc[0], vmax=vc[1], alpha=0.5, cmap=cmap)
+    cb = fig.colorbar(s, cax=cax)
+    cb.set_label(Clabel)
+    
+    for i in range(1,3):
+        fig.axes[i].set_ylabel('')
+        fig.axes[i].set_yticklabels([])
+        
+    unicorn.plotting.savefig(fig, '../excess_solar_F10x.pdf', increment=False)
     
 def sunangle(filter='F105W', alpha=0.2):
     import mywfc3.bg
@@ -971,8 +1064,17 @@ def sunangle(filter='F105W', alpha=0.2):
     if False:
         #### Look into offset of shadow zodi / obs as a function of sun angle
         bgf = catIO.Readfile('master.dat', force_lowercase=False, save_fits=False)
+        bgf.exposure = bgf.name
+        for i in range(bgf.N):
+            bgf.exposure[i] = bgf.name[i].split('j_')[0]+'q'
+        #
+        # solar flux
+        sun_f10 = np.loadtxt('master.sun_f10')
+        
         sun_zd = np.loadtxt('master.sun_zd')
         sun_ha = np.loadtxt('master.sun_ha')
+        sun_ha[sun_ha < -12] += 24 #-sun_ha[sun_ha < -12]-24
+        sun_ha[sun_ha > 12] -= 24 #-sun_ha[sun_ha > -12]+24
         sun_a = np.zeros(bgf.N)
         for i in range(bgf.N):
             print i
@@ -992,8 +1094,21 @@ def sunangle(filter='F105W', alpha=0.2):
         plt.scatter(sun_zd[in_sun], (bgf.bg/bgf.zodi)[in_sun], c=sun_ha[in_sun], vmin=-5, vmax=5, alpha=0.4)
         plt.colorbar()
 
-
-def single_sunangle(filter='F105W', alpha=0.2, log=False):
+        ####
+        from subprocess import Popen,PIPE
+        flux10 = catIO.Readfile('../Solar_10.7_fluxtable.txt')
+        bgf.f10 = bgf.bg*0
+        files = glob.glob('i*orbit.dat')
+        for file in files:
+            print file
+            exp = file.split('j_')[0]
+            stdout, stderr = Popen('gethead -x 0 %sq_raw.fits EXPSTART NSAMP' %(exp), shell=True, stdout=PIPE).communicate()
+            mjd, nsamp = np.cast[float](stdout.split())
+            jd0 = mjd+24.e5+0.5
+            f10_exp = np.interp(jd0, flux10.fluxjulian, flux10.fluxobsflux)
+            np.savetxt(file.replace('orbit.dat', 'orbit.sun_f10'), np.ones(nsamp-1).T*f10_exp)
+            
+def single_sunangle(filter='F105W', alpha=0.2, log=False, ax=None, cax=None, cmap='jet'):
     import mywfc3.bg
     from threedhst import catIO
     import cPickle as pickle
@@ -1009,9 +1124,10 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
     aspect, la, ra, ta, ba = 0.7, 0.06, 0.11, 0.02, 0.08
     aspect, la, ra, ta, ba = 0.5, 0.06, 0.105, 0.02, 0.105
 
-    fig = unicorn.plotting.plot_init(xs=7, aspect=aspect, left=0.01, right=0.01, top=0.01, bottom=0.01, wspace=0, hspace=0, NO_GUI=True, use_tex=True)
-    
-    ax = fig.add_axes((la, ba, 1-la-ra, 1-ba-ta))
+    fig = None
+    if ax is None:
+        fig = unicorn.plotting.plot_init(xs=7, aspect=aspect, left=0.01, right=0.01, top=0.01, bottom=0.01, wspace=0, hspace=0, NO_GUI=True, use_tex=True)
+        ax = fig.add_axes((la, ba, 1-la-ra, 1-ba-ta))
     
     p = {}
     
@@ -1045,11 +1161,12 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
             sun_ha = np.loadtxt(file.replace('dat','sun_ha')) #, 'SUN ZD'
             sun_ha[sun_ha < -12] += 24 #-sun_ha[sun_ha < -12]-24
             sun_ha[sun_ha > 12] -= 24 #-sun_ha[sun_ha > -12]+24
+            #
             # print file, np.diff(sun_ha).min(), np.diff(sun_ha).max()   
             #xAngle, Alabel, xr = bg.LimbAng, 'LimbAng', (10,119)
             #ok = bg.shadow == 0
             #xAngle, Alabel, xr = bg.LOS_Zenith, 'LOS Zenith', (1,100)
-            #xAngle, Alabel, xr = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (1,178)
+            #xAngle, Alabel, xr = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (0,178)
             xAngle, Alabel, xr = sun_ha, 'Subpoint Solar HA (hours)', (-12,12)
             ok = xAngle > -1000
             #### Remove some dense clusters
@@ -1058,10 +1175,8 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
             #ok = (bg.LimbAng >= 40) & (bg.shadow == 1)
             #
             #ax.plot(xAngle, yFlux, color='black', alpha=0.03)
-            if ok.sum() == 0:
-                continue
+            #print ok.sum()
             
-            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], yFlux[ok]*0, alpha=0.05, linewidth=1.2, ax=ax, vmin=0, vmax=1, cmap='gray', clip_dx=5)
             #
             ### Colored line segment
             #color_index, Clabel, vc = np.ones(bg.N)*sun_ang, 'Target-Sun Angle', (45, 140)
@@ -1069,19 +1184,32 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
             color_index, Clabel, vc = bg.LimbAng, 'Limb Angle', (15,100)
             ## color_index, Clabel, vc = np.loadtxt(file.replace('dat','sun_zd')), 'SUN ZD', (45,140)
             #color_index, Clabel, vc = sun_ha, 'Solar Hour Angle', (-5,5)
+            sun_f10 = np.loadtxt(file.replace('dat','sun_f10')) #, 'SUN ZD'
+            color_index, Clabel, vc = sun_f10, 'Solar 10.7cm flux', (70,160)
+            xAngle, Alabel, xr = bg.LimbAng, 'LimbAng', (10,119)
             
-            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], color_index[ok], alpha=alpha, linewidth=1.2, ax=ax, vmin=vc[0], vmax=vc[1], cmap='jet', clip_dx=5)
+            ### PMCC's "airmass" idea
+            xAngle, Alabel, xr = 1/np.cos((104-bg.LimbAng)/180*np.pi), 'LimbAM', (1,6.9)
+            
+            ok = ok & (np.abs(sun_ha) < 5)
+            
+            if ok.sum() == 0:
+                continue
+                        
+            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], yFlux[ok]*0, alpha=0.05, linewidth=1.2, ax=ax, vmin=0, vmax=1, cmap='gray', clip_dx=5+100*('hours' not in Alabel))
+
+            mywfc3.bg.color_lines(xAngle[ok], yFlux[ok], color_index[ok], alpha=alpha, linewidth=1.2, ax=ax, vmin=vc[0], vmax=vc[1], cmap=cmap, clip_dx=5+100*('hours' not in Alabel))
     
     ax.plot([-200,200], np.ones(2)*('d / z' in Ylabel), color='white', linewidth=3, alpha=0.8)
     ax.plot([-200,200], np.ones(2)*('d / z' in Ylabel), color='black', linewidth=1.3, alpha=0.8, linestyle='--')
     ax.set_xlim(xr); ax.set_ylim(-0.5,6)
     ax.set_xlabel(Alabel)
-            
-    #
-    s = ax.scatter(np.ones(2),np.ones(2)*1000, c=vc, vmin=vc[0], vmax=vc[1], alpha=0.5)
-    cax = fig.add_axes(((1-ra)+ra/10., ba, ra/4., 1-ta-ba))
-    cb = fig.colorbar(s, cax=cax)
-    cb.set_label(Clabel)
+                
+    if fig is not None:
+        cax = fig.add_axes(((1-ra)+ra/10., ba, ra/4., 1-ta-ba))
+        s = ax.scatter(np.ones(2),np.ones(2)*1000, c=vc, vmin=vc[0], vmax=vc[1], alpha=0.5)
+        cb = fig.colorbar(s, cax=cax)
+        cb.set_label(Clabel)
     
     yshade = [5,20,5.2,5.6]
     ### Ylog
@@ -1094,7 +1222,8 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
         yshade = [9,20,10,12]
         
     ax.set_ylabel(Ylabel) # + ', %s' %(filter))
-    ax.text(0.1, 0.7, filter, size=16, ha='left', va='bottom', transform=ax.transAxes)
+    if fig is not None:
+        ax.text(0.1, 0.7, filter, size=16, ha='left', va='bottom', transform=ax.transAxes)
     
     if 'HA' in Alabel:
         ax.fill_between([-14,-8], np.ones(2)*yshade[0], np.ones(2)*yshade[1], color='0.2', alpha=0.5)
@@ -1110,7 +1239,8 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False):
         ax.text(0, yshade[2], 'Day', ha='center', va='bottom')
         ax.text(0, yshade[3], r'\textit{HST} in ', ha='center', va='bottom')
         
-    unicorn.plotting.savefig(fig, filter+'_background_SunAngle_single.pdf', increment=True)
+    if fig is not None:
+        unicorn.plotting.savefig(fig, filter+'_background_SunAngle_single.pdf', increment=True)
     
        
 def color_lines(x, y, z, vmin=0, vmax=1, alpha=1, linewidth=2, cmap='spectral', clip_dx=None, ax=None):
@@ -1165,7 +1295,7 @@ def get_sun_angle():
         ra_sun, dec_sun = sun.RA_SUN[i], sun.DEC_SUN[i]
         c_targ = c.ICRSCoordinates(ra, dec, unit=(u.deg, u.deg))
         c_sun = c.ICRSCoordinates(ra_sun, dec_sun, unit=(u.deg, u.deg))
-        sun_angle[key] = c_targ.separation(c_sun).value
+        sun_angle[key] = c_targ.separation(c_sun).degrees #value
     #
     fp = open('f105w_sun_coords.pkl','wb')
     pickle.dump(sun_angle, fp)
@@ -1245,23 +1375,368 @@ def compare_filters_1083():
     """
     import pysynphot as S
     
-    hei = S.GaussianSource(1.e-16, 1.083e4, 20)
+    line_level = 1 # e / s / pix
+    hei = S.GaussianSource(1.67e-16/2.0*line_level, 1.083e4, 20)
+    #hei = S.GaussianSource(8.403e-17, 1.083e4, 20)
     continuum = S.FlatSpectrum(23, fluxunits='ABMag')
+    #continuum = S.FlatSpectrum(23*1.e-9, fluxunits='photlam')
 
-    for filter in ['F098M', 'F105W', 'F110W', 'F125W']:
+    zodi = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
+    nz = zodi.renorm(25, S.units.VegaMag, S.ObsBandpass("V"))
+    bp = S.ObsBandpass('wfc3,ir,%s' %('F105W'.lower()))
+    obs_zodi = S.Observation(nz, bp)
+    zodi_refmag = 25+2.5*np.log10(2.84/30.63)
+    zodi_level = 1 # e/s/pix
+    refmag = 25+2.5*np.log10(obs_zodi.countrate()/zodi_level)
+    nz = zodi.renorm(refmag, S.units.VegaMag, S.ObsBandpass("V"))
+    
+    #wfc3_ir_dark = 0.0192
+    thermal = 1.556/30.63
+    dark = 1.532/30.63
+    RN = 14.6
+    
+    for filter in ['F098M', 'F105W', 'F110W', 'F125W', 'F140W', 'F160W', 'G102','G141']:
         bp = S.ObsBandpass('wfc3,ir,%s' %(filter.lower()))
         obs_hei = S.Observation(hei, bp)
         obs_cont = S.Observation(continuum, bp)
-        print '%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f' %(filter, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25))
-        
-        
+        obs_zodi = S.Observation(nz, bp)
+        print '%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f zodi=%.2f' %(filter, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25), obs_zodi.countrate())
+
+    #### Check optical filters -> nothing
+    # for bp_str in ['acs,wfc1,f814w', 'acs,wfc1,f850lp', 'wfc3,uvis1,f850lp']:
+    #     bp = S.ObsBandpass(bp_str)
+    #     obs_hei = S.Observation(hei, bp)
+    #     obs_cont = S.Observation(continuum, bp)
+    #     obs_zodi = S.Observation(nz, bp)
+    #     print '%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f zodi=%.2f' %(bp, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25), obs_zodi.countrate())
+       
+    
+    line_flam = 1.e-16/1.19
+    pix = 0.128254
+    flux_rayleigh = line_flam/pix**2/(3.7e-14/1.083e4)
+    
+    ### G102
+    line_flam = 1.e-16/1.00
+    pix = 0.128254
+    flux_rayleigh = line_flam/pix**2/(3.7e-14/1.083e4)
+    
     bp = S.ObsBandpass('wfc3,ir,f098m')
     obs_hei = S.Observation(hei, bp)
     obs_cont = S.Observation(continuum, bp)
     
+def compare_all():
+    files=glob.glob('*asn.fits')
+    files.sort()
+    for file in files:
+        print file
+        mywfc3.bg.compare_filter_sensitivity(Rap=0.4, mAB=25, root=file)
+        
+    #    
+    import pysynphot as S
+    bp = {}
+    width = {}
+    for filt in ['F098M', 'F105W', 'F110W']:
+        bp[filt] = S.ObsBandpass('wfc3,ir,%s' %(filt.lower()))
+        ok = bp[filt].throughput > (0.5*bp[filt].throughput.max())
+        width[filt] = np.max(bp[filt].wave[ok]) - np.min(bp[filt].wave[ok])
+        
+    for filt in ['F098M', 'F105W', 'F110W']:
+        w_ratio = width[filt]/width['F098M']
+        l_ratio = bp[filt].pivot() / bp['F098M'].pivot()
+        print '%s %.3f %.3f %.3f' %(filt, w_ratio, l_ratio, np.sqrt(w_ratio)*l_ratio)
+     
+    os.system('head -1 ibl70k020_filter_SN.dat > SN_result.dat ; cat *SN.dat |grep -v "\#" >> SN_result.dat')
+    x = catIO.Readfile('SN_result.dat')
+    list = np.array(glob.glob('*SN.dat'))
+    list.sort()
     
-    zod = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
-    nz = zod.renorm(SB, S.units.VegaMag, S.ObsBandpass("V"))
-    bp = S.ObsBandpass('wfc3,ir,%s' %(FILTER.lower()))
-    obs = S.Observation(nz, bp)
+    ratio_f105w = x.obs_f105w / x.best_f098m
+    bad = (x.obs_f105w / x.best_f105w) > 1 ## zodi underestimated
+    ratio_f105w[bad] = (x.best_f105w / x.best_f098m)[bad]
+    
+    ratio_f110w = x.obs_f110w / x.best_f105w
+    ratio_f110w[bad] = (x.best_f110w / x.best_f105w)[bad]
+    
+    optimal_f105w = np.median(x.best_f105w / x.best_f098m)
+    optimal_f110w = np.median(x.best_f110w / x.best_f105w)
+    
+    ########### Make figure
+    la, ra, ta, ba = 0.06, 0.06, 0.07, 0.13
+    NX, NY = 1, 1
+    aspect = (NY*(1+ta+ba))/((2.*NX)*(1+la+ra))
+    dx = (1-la-ra)/2.    
+    
+    fig = unicorn.plotting.plot_init(xs=8, aspect=aspect, left=0.08, right=0.025, top=0.015, bottom=0.08, hspace=0.0, wspace=0.17, use_tex=True, NO_GUI=True)
+    
+    #### Demo
+    ax = fig.add_subplot(121)
+    mywfc3.bg.compare_filter_sensitivity(Rap=0.4, mAB=25, root='ibp329i[qs]', cax=ax)    
+    
+    #### Prefer F105W over F098M ? 
+    ax2 = fig.add_subplot(122)
+    ran, bins = (0.6,1.60), 50
+    yh, xh, nn = ax2.hist(ratio_f105w[ratio_f105w >= 1], range=ran, bins=bins, alpha=0.5, color='green', normed=False, histtype='stepfilled')
+    yh, xh, nn = ax2.hist(ratio_f105w[ratio_f105w < 1], range=ran, bins=bins, alpha=0.5, color='blue', normed=False, histtype='stepfilled')
+    
+    ax2.plot(optimal_f105w*np.ones(2), [0,42], color='green', linewidth=2, alpha=0.8)
+    ax2.set_xlabel(r'S/N: F105W$_\mathrm{observed}$ / F098M$_\mathrm{No\,\,He}$')
+    ax2.set_ylabel(r'$N_\mathrm{visit}$')
+    
+    yy, dy = 46, 4
+    ax2.fill_between([ran[0],1.0], (yy+dy)*np.ones(2), (yy-dy)*np.ones(2), color='blue', edgecolor='None', linewidth=4, alpha=0.8)
+    ax2.text(ran[0]+(1-ran[0])/2., yy, 'F098M', color='white', va='center', ha='center')
+    ax2.fill_between([1.0,ran[1]], (yy+dy)*np.ones(2), (yy-dy)*np.ones(2), color='green', edgecolor='None', linewidth=4, alpha=0.8)
+    ax2.text(1+(ran[1]-1)/2., yy, 'Prefer F105W', color='white', va='center', ha='center')
+
+    ax2.set_xlim(ran)
+    ax2.set_ylim((0,50))
+    
+    unicorn.plotting.savefig(fig, 'choose_Y_filter.pdf')
+    
+    #### Prefer F110W over F105W ? 
+    # ax3 = fig.add_subplot(133)
+    # yh, xh, nn = ax3.hist(ratio_f110w, range=ran, bins=bins, alpha=0.5, color='red', normed=False, histtype='stepfilled')
+    # ax3.plot(optimal_f110w*np.ones(2), [0,42], color='red', linewidth=2, alpha=0.8)
+    # ax3.set_xlabel(r'S/N: F110W$_\mathrm{observed}$ / F105W$_\mathrm{No\,\,He}$')
+    # ax3.set_ylabel(r'$N_\mathrm{visit}$')
+    # 
+    # ax3.fill_between([ran[0],1.0], (yy+dy)*np.ones(2), (yy-dy)*np.ones(2), color='green', edgecolor='None', linewidth=4, alpha=0.8)
+    # ax3.text(ran[0]+(1-ran[0])/2., yy, 'F105W', color='white', va='center', ha='center')
+    # ax3.fill_between([1.0,ran[1]], (yy+dy)*np.ones(2), (yy-dy)*np.ones(2), color='red', edgecolor='None', linewidth=4, alpha=0.8)
+    # ax3.text(1+(ran[1]-1)/2., yy, 'Prefer F110W', color='white', va='center', ha='center')
+    # 
+    # ax3.set_xlim(ran)
+    # ax3.set_ylim((0,50))
+    
+    unicorn.plotting.savefig(fig, 'choose_Y_filter.pdf')
+    
+    yh, xh, nn = plt.hist(ratio_f110w, range=ran, bins=bins, alpha=0.5, color='red', normed=True, histtype='stepfilled')
+    plt.plot(optimal_f110w*np.ones(2), [0,37], color='red', linewidth=2, alpha=0.8)
+    #plt.hist(x.best_f105w / x.best_f098m, range=(0,2), bins=100, alpha=0.5, color='green')
+    
+    efficiency = (x.obs_f105w / x.best_f105w)**2
+    
+    plt.scatter(x.texp, x.obs_f105w / x.best_f098m, alpha=0.5)
+    
+def compare_filter_sensitivity(Rap=0.4, mAB=25, root='ibp329i[qs]', cax=None):
+    import pysynphot as S
+    import threedhst
+    from threedhst import catIO
+    
+    zodi = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
+    nz = zodi.renorm(25, S.units.VegaMag, S.ObsBandpass("V"))
+    bp = S.ObsBandpass('wfc3,ir,%s' %('F105W'.lower()))
+    obs_zodi = S.Observation(nz, bp)
+    zodi_refmag = 25+2.5*np.log10(2.84/30.63)
+    zodi_level = 1 # e/s/pix
+    refmag = 25+2.5*np.log10(obs_zodi.countrate()/zodi_level)
+    nz = zodi.renorm(refmag, S.units.VegaMag, S.ObsBandpass("V"))
+    
+    ### Compare S/N in F105W / F098M
+    thermal = 1.556/30.63
+    dark = 1.532/30.63
+    RN = 14.6
+    
+    #Rap = 0.4
+    Area = np.pi*(Rap/0.128254)**2
+    enclosed = 0.85
+    
+    #mAB = 25
+    
+    continuum = S.FlatSpectrum(mAB, fluxunits='ABMag')
+    #continuum = S.FlatSpectrum(mAB+2.5*np.log10(3.713), fluxunits='STMag')
+    #bp = S.ObsBandpass('wfc3,ir,%s' %(filter.lower()))
+    
+    obs = {}
+    zodi = {}
+    for band in ['f098m', 'f105w', 'f110w']:
+        obs[band] = S.Observation(continuum, S.ObsBandpass('wfc3,ir,%s' %(band))).countrate()
+        zodi[band] = S.Observation(nz, S.ObsBandpass('wfc3,ir,%s' %(band))).countrate()
+        
+    # orbit = catIO.Readfile('ibp329iqj_F105W_orbit.dat')
+    # orbit = catIO.Readfile('ibp329isj_F105W_orbit.dat')
+    # orbit.nexp = orbit.read*0+1
+    
+    #root='ibp329i[qs]'
+    if 'asn' in root:
+        outfile = root.replace('_asn.fits', '_filter_SN.pdf')
+        asn = threedhst.utils.ASNFile(root)
+        exposures = []
+        for exp in asn.exposures:
+            x = glob.glob('%s*orbit.dat' %(exp[:-1]))
+            if len(x) > 0:
+                exposures.append(x[0])
+        #
+        if len(exposures) == 0:
+            return False
+    else:
+        exposures = glob.glob('%s*orbit.dat' %(root))
+        outfile = 'filter_SN.pdf'
+    
+    os.system('cat %s > f105w_example.dat' %(' '.join(exposures)))
+    orbit = catIO.Readfile('f105w_example.dat')
+    
+    #### Force F105W zodi = 1.
+    orbit.bg = orbit.bg - orbit.zodi + 1.
+    orbit.zodi = orbit.zodi*0.+1.
+    
+    ni = 0
+    orbit.nexp = orbit.read*0
+    for i in range(orbit.N):
+        if orbit.read[i] == 1:
+            ni += 1
+        #
+        orbit.nexp[i] = ni
+    
+    #
+    t0 = 0
+    time = orbit.seconds*1
+    for i in range(1, orbit.N):
+        if orbit.seconds[i] < orbit.seconds[i-1]:
+            t0 += orbit.seconds[i-1]
+            print t0
+        #
+        time[i] += t0
+        
+    orbit.read = np.arange(1,orbit.N+1)
+    #dt = 100
+    #time = orbit.read*dt
+    #time = orbit.seconds
+    dt = np.append(time[0], np.diff(time))
+    
+    source_signal = {}
+    bkg_signal = {}
+    he_bkg_signal = {}
+    variance = {}
+    ratio = {}
+    sn_optimal = {}
+    sn_observed = {}
+    
+    if cax is None:
+        fig = unicorn.plotting.plot_init(xs=4, aspect=1, left=0.09, top=0.01, bottom=0.08, right=0.01, hspace=0.03, wspace=0., use_tex=True, NO_GUI=True)
+        ax = fig.add_subplot(111)
+    else:
+        ax = cax
+        
+    colors = {'f098m':'blue', 'f105w':'green', 'f110w':'red'}
+    alphas = {'f098m':0.5, 'f105w':0.8, 'f110w':0.5}
+    max = 0
+
+    ax.plot([0,10],[500,500], color='black', alpha=0.8, linestyle='--', linewidth=3, label='with observed He background')
+
+    for band in ['f110w', 'f105w', 'f098m']:
+        source_signal[band] = time*obs[band]*enclosed
+        bkg_signal[band] = time*(zodi[band]*Area*orbit.zodi[0] + (thermal + dark)*Area)
+        variance[band] = source_signal[band] + bkg_signal[band] + RN**2*Area*orbit.nexp
+        #
+        label = band.upper() + ', observed'*(band == 'f105w') + ', inferred'*(band != 'f105w')
+        ax.plot(time, source_signal[band]/np.sqrt(variance[band]), linewidth=3, alpha=alphas[band], label=label, color=colors[band])
+        sn_optimal[band] = (source_signal[band]/np.sqrt(variance[band]))[-1]
+        sn_observed[band] = sn_optimal[band]
+        max = np.maximum(max, sn_optimal[band])
+        ratio[band] = 1
+        #
+        he_bkg_signal = bkg_signal[band]*1
+        if 'f1' in band:
+            he_bkg_signal += np.cumsum(dt*(orbit.bg-orbit.zodi)*Area)
+            #
+            he_variance = source_signal[band] + he_bkg_signal + RN**2*Area*orbit.nexp
+            ax.plot(time, source_signal[band]/np.sqrt(he_variance), linewidth=3, alpha=alphas[band], color=colors[band], linestyle='--')
+            #
+            sn_observed[band] = (source_signal[band]/np.sqrt(he_variance))[-1]
+            ratio[band] = sn_optimal[band] / sn_observed[band]
+        #
+        print '%s  %.0f %d S/N=%.1f eff=%.2f' %(band, time[-1], orbit.nexp[-1], sn_optimal[band], ratio[band]**2)
+    #
+    
+    ax.legend(loc='upper left', prop={'size':9}, handlelength=2.5, frameon=False)
+    ax.set_xlim(0,1.05*time.max())
+    ax.set_ylim(0,1.2*max)
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel(r'S/N($t$)')
+    ax.text(0.95*time.max(),0.2*max,'%s\n' %(root.replace('_asn.fits','')) + r'$m_\mathrm{AB}=%d$, R=%.1f$^{\prime\prime}$' %(mAB, Rap), ha='right', va='center') #, bbox=dict(edgecolor='black', facecolor='white', pad=10))
+    
+    if cax is None:
+        unicorn.plotting.savefig(fig, outfile)
+        #
+        fp = open(outfile.replace('.pdf','.dat') ,'w')
+        fp.write('# texp Nexp best_f098m best_f105w obs_f105w best_f110w obs_f110w\n# %s\n' %(' '.join(exposures)))
+        fp.write(' %d  %d  %.3f  %.3f %.3f  %.3f %.3f\n' %(time[-1], len(exposures), sn_optimal['f098m'], sn_optimal['f105w'], sn_observed['f105w'], sn_optimal['f110w'], sn_observed['f110w']))
+        fp.close()
+    
+    return exposures, sn_optimal, sn_observed
+    
+    # zod = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
+    # nz = zod.renorm(SB, S.units.VegaMag, S.ObsBandpass("V"))
+    # bp = S.ObsBandpass('wfc3,ir,%s' %(FILTER.lower()))
+    # obs = S.Observation(nz, bp)
+    
+def raw2flt():
+    """
+    *** Don't have to bother, get this from the last read of the IMA file! ***
+    
+    Idea, just take the last read as the full integration and subtract out a
+    combination of low-line and high-line sky images
+    
+    (still need to create optimal sky images but current could work for test)
+    
+    have error array include full poisson term?
+    
+    - let multidrizzle flag the CRs
+    
+    - ignore saturated for now...
+    """
+    raw = pyfits.open('ibt311j6q_raw.fits')
+    raw = pyfits.open('icat19ueq_raw.fits') # barro
+    raw = pyfits.open('ica531hgq_raw.fits') # glass
+    flt = pyfits.open(raw.filename().replace('raw','flt'))
+    
+    GFLAT = pyfits.open(os.getenv('iref')+ raw[0].header['PFLTFILE'].split('$')[1])[1].data
+
+    DFLAT = {}
+    DFLAT['G102'] = pyfits.open(os.path.join(os.getenv('iref'), 'uc72113oi_pfl.fits'))[1].data  # F105W
+    DFLAT['G141'] = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data  # F140W
+    FLAT = DFLAT[raw[0].header['FILTER']]
+    
+    NSAMP = raw[0].header['NSAMP']
+    
+    im_dark = pyfits.open(os.getenv('iref')+ raw[0].header['DARKFILE'].split('$')[1])
+    dark = im_dark['SCI', 16-NSAMP+1].data-im_dark['SCI',16].data
+    
+    GAIN = raw[0].header['CCDGAIN']
+    
+    ### Subtract zeroth order read
+    LAST = 4
+    sci1 = raw['SCI', LAST].data - raw['SCI', NSAMP].data
+    SAMPTIME = raw['SCI', LAST].header['SAMPTIME']
+    
+    ### Non-linearity correction
+    im_lin = pyfits.open(os.getenv('iref')+ raw[0].header['NLINFILE'].split('$')[1])
+    Fc = sci1
+    for i in range(1,5):
+        Fc += im_lin['COEF', i].data*sci1**i
+    
+    #### Imaging flat correction
+    counts = ((Fc - dark)*GAIN)
+    
+    #### UNITCORR (e/s), FLATCORR
+    new_flt = (counts/SAMPTIME/GFLAT)[5:-5,5:-5]
+    new_err = np.sqrt(counts + 20**2)/SAMPTIME
+    
+    # sky = pyfits.open(os.getenv('THREEDHST')+'/CONF/sky.G141.set005.fits')[0].data
+    # sky = pyfits.open(os.getenv('THREEDHST')+'/CONF/sky.G141.set002.fits')[0].data
+    # sky = pyfits.open(os.getenv('THREEDHST')+'/CONF/sky_g102_f105w.fits')[0].data
+    # 
+    # flt_sub = pyfits.open('../PREP_FLT/'+raw.filename().replace('raw','flt'))
+    
+    #### Check IMA
+    ima2 = pyfits.open('ibhj03xvq_ima.fits')
+    flt = pyfits.open(ima.filename().replace('ima','flt'))
+    
+    NSAMP = ima[0].header['NSAMP']
+    dq = ima2['dq',1].data*0
+    for i in range(NSAMP):
+        dq = dq | ima2['dq',i+1].data
+        ds9.view(ima['dq',i+1].data)
+        
     

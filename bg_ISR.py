@@ -148,7 +148,7 @@ def orbit_tracks(FILTER = 'F105W', PATH = '/Users/brammer/WFC3/Backgrounds/Broad
         ax_limb.set_yticklabels([])
         ax.set_yticklabels([])
     else:
-        ax_limb.set_ylabel('Jitter: LimbAng')
+        ax_limb.set_ylabel('LimbAng')
         ax.set_ylabel('Background (e- / s)')
         
     if axlabels[2]:
@@ -367,14 +367,17 @@ def blob_demo():
     flat = pyfits.open('/Users/brammer/Research/HST/IREF/flat_3DHST_F140W_t1_v0.1.fits')[1].data[5:-5,5:-5]
     
     xy = np.array([[204,377], [431,457]])
-    
     NX, NY = np.diff(xy, axis=0)[0]
-    
     la, ra, ta, ba = 0.055, 0.005, 0.16, 0.29
-
     aspect = (NY*(1+ta+ba))/((3.*NX)*(1+la+ra))
-    
-    fig = unicorn.plotting.plot_init(xs=8, aspect=aspect, left=0, right=0, top=0, bottom=0, hspace=0.0, wspace=0, use_tex=True, NO_GUI=True)
+
+    # larger
+    xy = np.array([[204,357], [431,477]])
+    NX, NY = np.diff(xy, axis=0)[0]
+    la, ra, ta, ba = 0.055, 0.005, 0.12, 0.22
+    aspect = (NY*(1+ta+ba))/((3.*NX)*(1+la+ra))
+        
+    fig = unicorn.plotting.plot_init(xs=8, aspect=aspect, square=True, left=0, right=0, top=0, bottom=0, hspace=0.0, wspace=0, use_tex=True, NO_GUI=False)
     
     images = [flat, no_blob, yes_blob]
     labels = ['Flat F140W', 'G141/Flat, low background', 'G141/Flat, high background']
@@ -384,7 +387,8 @@ def blob_demo():
         ax = fig.add_axes((la+dx*i, ba, dx, 1-ba-ta))
         med = np.median(images[i][xy[1][0]:xy[1][1],xy[0][0]:xy[0][1]])
         print med
-        ax.imshow(images[i]/med, vmin=0.92, vmax=1.04, aspect='auto')
+        #ax.imshow(images[i]/med, vmin=0.92, vmax=1.04, aspect='auto')
+        ax.imshow(images[i]/med, vmin=0.92, vmax=1.02, aspect='auto', interpolation='nearest')
         ax.set_xlim(xy[:,0])
         ax.set_ylim(xy[:,1])
         ax.set_yticks([400,450])
@@ -404,6 +408,15 @@ def blob_demo():
         #     ax.arrow(230+dxa+dd*np.cos(thet), 417+dya+dd*np.sin(thet), -dd*np.cos(thet), -dd*np.sin(thet), color='white', linewidth=1.2, head_width=dd*0.2, head_length=dd*0.2, overhang=0.5, length_includes_head=False)
         #     ax.text(230+dxa+dd*np.cos(thet)+5, 417+dya+dd*np.sin(thet), 'Blob', color='black', ha='left', va='center')
         
+    ax1 = fig.axes[1]
+    ax1.errorbar(330, 443, 0, 70, color='red', ecolor='red', linewidth=1.5, elinewidth=1.5)
+    ax1.text(330, 450+10, 'Zodiacal continuum', ha='center', va='bottom', color='red', backgroundcolor='white')
+
+    ax2 = fig.axes[2]
+    ax2.text(330, 450+10, 'Emission line', ha='center', va='bottom', color='red', backgroundcolor='white')
+    d = 15
+    ax2.arrow(290, 450, -d*0.8, -d, head_width=d*0.2, head_length=d*0.2, overhang=0.5, color='red', linewidth=1.5)
+    
     #
     unicorn.plotting.savefig(fig, 'blob_demo.pdf')
     
