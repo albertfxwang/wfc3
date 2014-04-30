@@ -46,6 +46,23 @@ def cgs_to_rayleigh(flux_cgs=1.e-16, flux_cps=None, area=0.0164):
     rayleigh = flux_cgs/(3.715e-14/wavelen)/area
     return rayleigh
     
+def go_check():
+    """
+    Generate plots in a particular directory
+    """
+    import glob
+    import mywfc3.bg
+    
+    asn_files = glob.glob('*jif.fits*')
+    force = False
+    for asn in asn_files:
+        root = asn.split('_jif')[0]
+        if (len(glob.glob('%s_*orbit.png' %(root))) == 0) | force:
+            try:
+                mywfc3.bg.show_orbit_limbangle(asn = [root])
+            except ValueError:
+                pass
+                  
 def go():
     import mywfc3.bg
     
@@ -1738,5 +1755,266 @@ def raw2flt():
     for i in range(NSAMP):
         dq = dq | ima2['dq',i+1].data
         ds9.view(ima['dq',i+1].data)
+     
+def shadow_phase(fits='ib5x51l5q_flt.fits.gz', verbose=True):
+    """
+    Compute which half of an orbit will be in shadow for a particular 
+    RA/Dec at a given time
+    """
+    import ephem
+    import cPickle as pickle
+    import astropy.coordinates as co
+    import astropy.units as u
+    
+    import subprocess
+    #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
+    
+    fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
+    hjd = pickle.load(fp)
+    hra = pickle.load(fp)
+    hdec = pickle.load(fp)
+    fp.close()
+       
+    # fits = 'ib5x51l5q_flt.fits.gz' # beginning
+    # ra, ra_antisun = 53.2726125, 149.20238228, 233.160416666
+    # fits = 'ib5x0blyq_flt.fits.gz' # end
+    # ra, ra_antisun, ra_antiobj = 53.1604166667, 313.360343191, 233.160416666
+    # fits = 'ib5x31mqq_flt.fits.gz' # middle, just end
+    # ra, ra_antisun, ra_antiobj = 53.257475, 45.2557456737, 233.257475
+    
+    if fits is not None:
+        if 'gz' in fits:
+            p = subprocess.Popen('gunzip -c %s | dfits - | fitsort RA_TARG DEC_TARG EXPSTART | tail -1 ' %(fits), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = p.communicate()
+            ra, dec, jd = np.cast[float](stdout.split())
+        else:
+            head = pyfits.getheader(fits, ext=0)
+            ra, dec, jd = head['RA_TARG'], head['DEC_TARG'], head['EXPSTART']
+            
+    ra_sun = np.interp(jd, hjd-24.e5, hra)
+    dec_sun = np.interp(jd, hjd-24.e5, hdec)
+    
+    eq_targ = co.ICRSCoordinates(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    eq_sun = co.ICRSCoordinates(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
+    
+    # ra_antisun = ra_sun - 180
+    # if ra_antisun < 0:
+    #     ra_antisun = ra_sun + 180
+    # 
+    # ra_antiobj = ra - 180
+    # if ra_antiobj < 0:
+    #     ra_antiobj = ra + 180
+            
+    ra_antisun = (ra_sun + 180) % 360.
+    ra_antiobj = (ra + 180) #% 360.
+    
+    #print ra, ra_antisun, ra_antiobj
+    
+    if (ra_antisun > ra) & (ra_antiobj > ra_antisun):
+        bright = 'Beginning'
+    else:
+        bright = 'End'
         
+    if verbose:
+        print 'File    Ra   Ra_antisun  Ra_antiobj   Bright'
+        print '%s   %.3f  %.3f  %.3f  %s' %(fits, ra, ra_antisun, ra_antiobj, bright)
+    
+    return (bright == 'End')*1 #+ (np.abs(ra-ra_antisun) < 20)*2
+    
+    #return dec-sun_dec, ra-sun_ra
+    
+    #ra, dec = 34.440618, -5.1721396
+    # eq = co.ICRSCoordinates(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    # equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
+    # eclip_obs = ephem.Ecliptic(equat)
+    # 
+    # eq = co.ICRSCoordinates(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
+    # equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
+    # eclip_sun = ephem.Ecliptic(equat)
+    # 
+    # return (eclip_obs.lat-eclip_sun.lat)/np.pi*180, (eclip_obs.lon-eclip_sun.lon)/np.pi*180
+    
+def test_phase():
+    
+    d = catIO.Readfile('master.dat')
+    ha = np.loadtxt('master.sun_ha')
+    names = []
+    for n in d.name:
+        names.append(n.split('j_')[0]+'q')
+    
+    names = np.array(names)
+       
+    uniq = np.unique(names)
+    colors = ['red','blue', 'orange', 'green']
+    for n in uniq:
+        f = glob.glob(n+'_flt.fits*')[0]
+        bright = mywfc3.bg.shadow_phase(fits=f, verbose=False)
+        xx = names == n
+        print n
+        plt.scatter(ha[xx], (d.bg-d.zodi)[xx], color=colors[bright], alpha=0.1)
+        
+def check_ephem():
+    """
+    N. Grogin sent me the HST ephemeris for the first set of A2744 F105W 
+    visits.  Check that my estimates of the shadow entry correspond to
+    the entries in the ephemeris
+    """
+    import subprocess
+    import astropy.time as t
+    import astropy.units as u
+    
+    fits = 'ic8n04wpq_flt.fits.gz'
+    
+    files = glob.glob('ic8n07*flt.fits.gz')
+    tstart = []
+    tend = []
+    for fits in files:
+        if 'gz' in fits:
+            p = subprocess.Popen('gunzip -c %s | dfits - | fitsort EXPSTART EXPEND | tail -1 ' %(fits), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = p.communicate()
+            expstart, expend = np.cast[float](stdout.split())
+        else:
+            head = pyfits.getheader(fits, ext=0)
+            expstart, expend = head['EXPSTART'], head['EXPEND']
+        #
+        tstart.append(expstart)
+        tend.append(expend)
+    
+    tstart = t.Time(tstart, format='mjd', scale='utc')
+    tend = t.Time(tend, format='mjd', scale='utc')
+    #plt.plot_date(texp.plot_date, np.ones(2), color='blue', alpha=0.5, linestyle='-', linewidth=4)
+    
+    ### Read SHADOW ephemeris
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('shadow_ephem.dat', unpack=True, dtype=str)
+
+    ttag = []
+    for tt in e_ttag:
+        ttag.append('2013:'+tt)
+        
+    tshadow = t.Time(ttag, scale='utc', format='yday')
+    i = e_comment[0] == 'EXIT'
+    tshad_entry = tshadow[i::2]
+    tshad_exit = tshadow[i+1::2]
+    
+    dt = t.TimeDelta(120*u.second)
+    
+    ### Show exposures
+    NEXP = len(tstart)
+    for i in range(NEXP):
+        texp = t.Time([tstart[i], tend[i]])
+        plt.plot_date(texp.plot_date, np.ones(2)*10, color='blue', alpha=0.5, linestyle='-', linewidth=1)
+        plt.fill_between(texp.plot_date, 0.5*np.ones(2), 1.5*np.ones(2), color='blue', alpha=0.5)
+    
+    plt.gcf().autofmt_xdate()
+    
+    ### Show SHADOW
+    dt = t.TimeDelta(2*u.hour)
+    ok = (tshad_entry > (tstart[0]-dt)) & (tshad_entry < (tend[-1]+dt))
+    
+    ix = np.arange(len(ok))[ok]
+    for i in ix:
+        tshad = t.Time([tshad_entry[i], tshad_exit[i]])
+        #plt.plot_date(tshad.plot_date, np.ones(2)+1, color='black', alpha=0.5, linestyle='-', linewidth=1)
+        plt.fill_between(tshad.plot_date, 1.6*np.ones(2), 2.1*np.ones(2), color='black', alpha=0.5)
+        
+    ### Set xlimits
+    dt = t.TimeDelta(10*u.minute)
+    xlim = t.Time([tstart[0]-dt, tend[-1]+dt])
+    plt.xlim(xlim.plot_date)
+    
+    plt.ylim(0,2.6)
+    
+def future_ephem():
+    """
+    Compute shadow characterisics for upcoming visits
+    """
+    import subprocess
+    import astropy.time as t
+    import astropy.units as u
+    
+    os.system('cat ephem_upcoming_1.dat | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_1.reform')
+
+    os.system('cat ephem_upcoming_2.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_2.reform')
+    
+    os.system('cat ephem_past_1.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_past_1.reform')
+    
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_2.reform', unpack=True, dtype=np.str)
+    
+    #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
+    
+    event = ['%s_%s' %(item, comment) for item, comment in zip(e_item, e_comment)]
+    ttag = []
+    for tt in e_ttag:
+        ttag.append('2014:'+tt)
+        
+    times = t.Time(ttag, scale='utc', format='yday')
+    
+    skip = ['SAA27_EXIT', 'SAA27_ENTRY', 'SAA30_EXIT', 'TGT_AVD_ENTRY', 'FGS_AVD_EXIT', 'FGS_AVD_ENTRY', 'SHADOW_EXIT']
+    keys = {'SAA30_ENTRY':0.2, 'TGT_AVD_EXIT':1, 'SHADOW_ENTRY':1.8}
+    colors = {'SAA30_ENTRY':'green', 'TGT_AVD_EXIT':'blue', 'SHADOW_ENTRY':'black'}
+    
+    #### Past exposures
+    # flt_files = glob.glob('ic8n*flt*')
+    # flt_start, flt_end = [], []
+    # for file in flt_files:
+    #     print file
+    #     p = subprocess.Popen('gunzip -c %s | dfits - | fitsort EXPSTART EXPEND | tail -1 ' %(file), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #     stdout, stderr = p.communicate()
+    #     expstart, expend = np.cast[float](stdout.split())
+    #     flt_start.append(t.Time(expstart, scale='utc', format='mjd'))
+    #     flt_end.append(t.Time(expend, scale='utc', format='mjd'))
+
+    Nexp = len(flt_start)
+    
+    last = {}
+    orbit_shadow = []
+    t0 = times[0]
+    for i in range(len(times)): #[:500]:
+        if event[i] in skip:
+            continue
+        #
+        ### Parse the duration
+        dt_parse = np.cast[float](e_d[i][2:].split(':'))*np.array([u.day, u.hour, u.minute, u.second])
+        dt = t.TimeDelta(dt_parse.sum())
+        if event[i] == 'TGT_AVD_EXIT':
+            acq = t.TimeDelta(8*u.minute)
+        else:
+            acq = t.TimeDelta(0*u.minute)
+        #
+        interval = t.Time([times[i]+acq, times[i]+dt])
+        #
+        plt.plot_date(interval.plot_date, np.ones(2)*keys[event[i]], color=colors[event[i]], alpha=0.5, linestyle='-', linewidth=1, marker='None')
+        plt.fill_between(interval.plot_date, -0.5*np.ones(2)+keys[event[i]], 0.5*np.ones(2)+keys[event[i]], color=colors[event[i]], alpha=0.5)
+        #
+        last[event[i]] = interval
+        if 'TGT' in event[i]:
+            orbit_shadow.append((last['SHADOW_ENTRY'][1] - last['TGT_AVD_EXIT'][0]))
+        #
+        if (times[i]-t0) > 1*u.day:
+            for j in range(Nexp):
+                if (flt_start[j] > t0) & (flt_start[j] < times[i]):
+                    exp_int = t.Time([flt_start[j], flt_end[j]])
+                    plt.fill_between(exp_int.plot_date, -0.2*np.ones(2), 1.8*np.ones(2), color='red', alpha=0.5)
+                    plt.gca().text(exp_int[1].plot_date, -0.3, flt_files[j].split('_flt')[0], rotation=90, size=8, ha='right', va='top')
+            #
+            plt.gcf().autofmt_xdate()
+            plt.ylim(-1,3)
+            t0.out_subfmt = 'date_hm'
+            plt.title(t0.iso)
+            t0.out_subfmt = 'date'
+            plt.savefig('ephem_%s.png' %(t0.iso))
+            print t0.iso
+            plt.close()
+            t0 = times[i]
+    #
+    plt.gcf().autofmt_xdate()
+    plt.ylim(-1,3)
+    t0.out_subfmt = 'date_hm'
+    plt.title(t0.iso)
+    t0.out_subfmt = 'date'
+    plt.savefig('ephem_%s.png' %(t0.iso))
+    plt.close()
+    t0 = times[i]
+    
+    
     

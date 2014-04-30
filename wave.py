@@ -79,12 +79,13 @@ def check_vy22():
     fig = unicorn.plotting.plot_init(xs=10, aspect=0.5, left=0.1, bottom=0.1, wspace=0, hspace=0)
     
     ### Run twice with old and new configuration files
-    #new, sub = False, 211
+    new, sub = False, 211
     new, sub = True, 212
     
     ax = fig.add_subplot(sub)
 
     for root, alpha in zip(['', '-off-x', '-off+x'], [0.4,0.4,0.4]):
+    #for root, alpha in zip(['', '-off-x', '-off+x'][:1], [0.4,0.4,0.4][:1]):
         sp = mywfc3.wave.get_vy22(root='Vy22%s-blue' %(root), new=new)
         ax.plot(sp.oned.lam, sp.oned.flux, color='blue', linewidth=2, alpha=alpha)
         sp = mywfc3.wave.get_vy22(root='Vy22%s-red' %(root), new=new)
@@ -104,7 +105,7 @@ def check_vy22():
     
     ax.set_xlabel(r'$\lambda$')
     
-    unicorn.plotting.savefig(fig, 'Vy22_center_Fixed.pdf')
+    unicorn.plotting.savefig(fig, 'Vy22_center_Fixed_v2.pdf')
     
     ##### Full model
     root='Vy22-red'
