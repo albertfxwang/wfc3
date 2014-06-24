@@ -46,7 +46,7 @@ def cgs_to_rayleigh(flux_cgs=1.e-16, flux_cps=None, area=0.0164):
     rayleigh = flux_cgs/(3.715e-14/wavelen)/area
     return rayleigh
     
-def go_check():
+def go_check(im_ext='raw', force=False):
     """
     Generate plots in a particular directory
     """
@@ -54,12 +54,11 @@ def go_check():
     import mywfc3.bg
     
     asn_files = glob.glob('*jif.fits*')
-    force = False
     for asn in asn_files:
         root = asn.split('_jif')[0]
         if (len(glob.glob('%s_*orbit.png' %(root))) == 0) | force:
             try:
-                mywfc3.bg.show_orbit_limbangle(asn = [root])
+                mywfc3.bg.show_orbit_limbangle(asn = [root], im_ext=im_ext)
             except ValueError:
                 pass
                   
@@ -260,11 +259,12 @@ def compute_shadow(root='ib5x15vlq', save_fits=False):
             orbit.addColumn('in_shadow', in_shadow*1)
             orbit.write_text(orbit.filename)
             
-def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
+def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw'):
     
     import scipy.ndimage as nd
     import mywfc3.utils
     import mywfc3.zodi
+    import mywfc3.etc_zodi
     
     # os.chdir('/Users/brammer/WFC3/Jitter')
     
@@ -315,7 +315,12 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
         if i == 0:
             targname = spt['TARGNAME']
             ax3.text(0.5, 0.95, targname, ha='center', va='top', transform=ax3.transAxes)
-            zodi = mywfc3.zodi.flt_zodi(mywfc3.utils.gzfile(expname+'_raw.fits'), verbose=False)
+            try:
+                zodi_obj = mywfc3.etc_zodi.ZodiacalLight(mywfc3.utils.gzfile(expname+'_raw.fits'))
+                zodi_obj.eval_filter(verbose=True)
+                zodi = zodi_obj.countrate
+            except:
+                zodi = mywfc3.zodi.flt_zodi(mywfc3.utils.gzfile(expname+'_raw.fits'), verbose=False)                
         #
         #### Start/stop times
         pstr = astropy.time.Time(spt['PSTRTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
@@ -333,12 +338,18 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
         bright = ext.data['BrightLimb'] == 1
         ax1.plot(((pstr-tstr).sec + ext.data['Seconds'][bright])/60., ext.data['LimbAng'][bright], color=colors[i], linewidth=6, alpha=0.5)
         #
-        ima = pyfits.open(gzfile('%s_raw.fits' %(expname)))
+        #print gzfile('%s_%s.fits' %(expname, im_ext)), '%s_%s.fits' %(expname, im_ext)
+        ima = pyfits.open(gzfile('%s_%s.fits' %(expname, im_ext)))
+        if im_ext == 'ima':
+            GAIN = 1
+        else:
+            GAIN = 2.5
+        #
         FILTER = ima[0].header['FILTER']
         time, ramp, reads = get_bg_ramp(ima)
         dt = np.diff(time)
         ok = dt > 24
-        ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., (ramp/dt*2.5)[ok], color=colors[i], linewidth=2)
+        ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., (ramp/dt*GAIN)[ok], color=colors[i], linewidth=2)
         ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., ramp[ok]*0+zodi, color='black', linestyle='--', alpha=0.5)
         #
         ##  Get shadow information from the JIF file
@@ -351,11 +362,11 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
             dt_out = (shadow_out-pstr).sec
             print 'JIF: in=%.3f out=%.3f' %(dt_in, dt_out)
             if dt_in > 0:
-                yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*2.5)[ok])
+                yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*GAIN)[ok])
                 ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color='green', alpha=0.8)
             #
             if (dt_out > 0) & (dt_out < time.max()):
-                yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*2.5)[ok])
+                yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*GAIN)[ok])
                 ax3.scatter(((pstr-tstr).sec + dt_out)/60., yi, marker='o', s=40, color='red', alpha=0.8)
             #
             in_shadow = ext.data['Seconds'] < -1
@@ -384,7 +395,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
         fp.write(line+'\n')
         
         for il in idx:
-            line = '%s_%02d %2d %.3f %.3f %.3f' %(ext.header['EXPNAME'], il, il, ramp[il]/dt[il]*2.5, np.min((ramp/dt*2.5)[ok]), zodi)
+            line = '%s_%02d %2d %.3f %.3f %.3f' %(ext.header['EXPNAME'], il, il, ramp[il]/dt[il]*GAIN, np.min((ramp/dt*GAIN)[ok]), zodi)
             #
             shadow = np.interp(time[1:][il]-dt[il]/2., ext.data['Seconds'], shadow_flag)
             line += ' %d' %(shadow)
@@ -396,7 +407,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8):
         fp.close()
         
         #img = nd.convolve(flt[1].data, np.ones((2,2))/4.)/med_background
-        last_read = (ima['SCI', 1].data-ima['SCI',len(time)].data)[5:-5, 5:-5]*2.5
+        last_read = (ima['SCI', 1].data-ima['SCI',len(time)].data)[5:-5, 5:-5]*GAIN
         FLAT = FLAT_F140W
         if FILTER in ['G102', 'F105W']:
             FLAT = FLAT_F105W
@@ -1756,10 +1767,34 @@ def raw2flt():
         dq = dq | ima2['dq',i+1].data
         ds9.view(ima['dq',i+1].data)
      
-def shadow_phase(fits='ib5x51l5q_flt.fits.gz', verbose=True):
+def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     """
     Compute which half of an orbit will be in shadow for a particular 
     RA/Dec at a given time
+    
+    If you don't have a FITS file you can set fits=None and 
+    info = (ra, dec, mjd)
+    
+    coe: 
+    import astropy.coordinates as co
+    import astropy.time
+    import mywfc3.bg
+
+    macs = co.ICRS('06h47m50.27s +70d14m55.0s')
+    obs_date = astropy.time.Time('2014-05-16 22:56:58', scale='utc')
+    obs_date = astropy.time.Time('2014-12-26 22:56:58', scale='utc')
+
+    mywfc3.bg.shadow_phase(fits=None, info=(macs.ra.deg, macs.dec.deg, obs_date.mjd))
+    
+    ### Rodney
+    import astropy.units as u
+    
+    a2744 = co.ICRS('3.588333333333E+00	-3.039725000000E+01', unit=(u.deg, u.deg))
+    obs_date = astropy.time.Time('2014-06-19 22:56:58', scale='utc')
+    mywfc3.bg.shadow_phase(fits=None, info=(a2744.ra.deg, a2744.dec.deg, obs_date.mjd))
+    mywfc3.bg.shadow_phase(fits='ica9t3a4q_raw.fits', info=None)
+    
+    
     """
     import ephem
     import cPickle as pickle
@@ -1790,7 +1825,9 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', verbose=True):
         else:
             head = pyfits.getheader(fits, ext=0)
             ra, dec, jd = head['RA_TARG'], head['DEC_TARG'], head['EXPSTART']
-            
+    else:
+       ra, dec, jd = info
+       
     ra_sun = np.interp(jd, hjd-24.e5, hra)
     dec_sun = np.interp(jd, hjd-24.e5, hdec)
     
@@ -1931,14 +1968,22 @@ def future_ephem():
     import subprocess
     import astropy.time as t
     import astropy.units as u
+    import os
+    import numpy as np
     
     os.system('cat ephem_upcoming_1.dat | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_1.reform')
 
     os.system('cat ephem_upcoming_2.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_2.reform')
     
     os.system('cat ephem_past_1.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_past_1.reform')
+
+    os.system('cat ephem_upcoming_m0416.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_m0416.reform')
+
+    os.system('cat ephem_jun17_13496.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jun17_13496.reform')
+
+    os.system('cat ephem_jun17_13498.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jun17_13498.reform')
     
-    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_2.reform', unpack=True, dtype=np.str)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_jun17_13498.reform', unpack=True, dtype=np.str)
     
     #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
     
@@ -1953,9 +1998,10 @@ def future_ephem():
     keys = {'SAA30_ENTRY':0.2, 'TGT_AVD_EXIT':1, 'SHADOW_ENTRY':1.8}
     colors = {'SAA30_ENTRY':'green', 'TGT_AVD_EXIT':'blue', 'SHADOW_ENTRY':'black'}
     
+    flt_start, flt_end = [], []
+    
     #### Past exposures
     # flt_files = glob.glob('ic8n*flt*')
-    # flt_start, flt_end = [], []
     # for file in flt_files:
     #     print file
     #     p = subprocess.Popen('gunzip -c %s | dfits - | fitsort EXPSTART EXPEND | tail -1 ' %(file), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
