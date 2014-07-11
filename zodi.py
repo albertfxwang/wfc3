@@ -97,7 +97,12 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
     eclip_sun = ephem.Ecliptic(equat)
     
-    return (eclip_obs.lat-eclip_sun.lat)/np.pi*180, (eclip_obs.lon-eclip_sun.lon)/np.pi*180
+    #dlon = (eclip_obs.lon-eclip_sun.lon)/np.pi*180
+    #print np.array([eclip_obs.lat, eclip_obs.lon, eclip_sun.lat, eclip_sun.lon])/np.pi*180
+    
+    dlon = ((eclip_obs.lon - eclip_sun.lon)/np.pi*180 + 180) % 360 - 180
+    
+    return (eclip_obs.lat-eclip_sun.lat)/np.pi*180, dlon
     
 def get_zodi_SB(lat, lng):
     

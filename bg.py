@@ -1803,6 +1803,11 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     
     import subprocess
     #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
+    # fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','wb')
+    # pickle.dump(hjd, fp)
+    # pickle.dump(hra, fp)
+    # pickle.dump(hdec, fp)
+    # fp.close()
     
     fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
     hjd = pickle.load(fp)
@@ -1823,14 +1828,19 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
             stdout, stderr = p.communicate()
             ra, dec, jd = np.cast[float](stdout.split())
         else:
-            head = pyfits.getheader(fits, ext=0)
-            ra, dec, jd = head['RA_TARG'], head['DEC_TARG'], head['EXPSTART']
+            # head = pyfits.getheader(fits, ext=0)
+            # ra, dec, jd = head['RA_TARG'], head['DEC_TARG'], head['EXPSTART']
+            p = subprocess.Popen('dfits %s | fitsort RA_TARG DEC_TARG EXPSTART | tail -1 ' %(fits), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = p.communicate()
+            #print stdout
+            ra, dec, jd = np.cast[float](stdout.split()[1:])
+            
     else:
        ra, dec, jd = info
        
-    ra_sun = np.interp(jd, hjd-24.e5, hra)
-    dec_sun = np.interp(jd, hjd-24.e5, hdec)
-    
+    ra_sun = np.interp(jd, hjd-24.e5-0.5, hra)
+    dec_sun = np.interp(jd, hjd-24.e5-0.5, hdec)
+        
     eq_targ = co.ICRSCoordinates(ra=ra, dec=dec, unit=(u.deg, u.deg))
     eq_sun = co.ICRSCoordinates(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
     
@@ -1847,16 +1857,27 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     
     #print ra, ra_antisun, ra_antiobj
     
-    if (ra_antisun > ra) & (ra_antiobj > ra_antisun):
+    import mywfc3.zodi
+    lat, lng = mywfc3.zodi.helio_lat_lng(ra, dec, jd+24.e5+0.5)
+    
+    #print ra, dec, ra_sun, dec_sun, lat, lng
+    
+    delta = (ra_antiobj - ra_antisun + 180) % 360 - 180
+    
+    #if (ra_antisun > ra) & (ra_antiobj > ra_antisun):
+    if delta > 0:
         bright = 'Beginning'
     else:
         bright = 'End'
         
-    if verbose:
-        print 'File    Ra   Ra_antisun  Ra_antiobj   Bright'
-        print '%s   %.3f  %.3f  %.3f  %s' %(fits, ra, ra_antisun, ra_antiobj, bright)
     
-    return (bright == 'End')*1 #+ (np.abs(ra-ra_antisun) < 20)*2
+    if verbose:
+        print 'File    Ra   Ra_antisun  Ra_antiobj   Bright  Delta  Ecl_Lng'
+        print '%s   %.3f  %.3f  %.3f  %s  %6.1f %6.1f' %(fits, ra, ra_antisun, ra_antiobj, bright, delta, lng)
+        
+    return ra, ra_antisun, delta, lng, (bright == 'End')*1
+        
+    #return (bright == 'End')*1 #+ (np.abs(ra-ra_antisun) < 20)*2
     
     #return dec-sun_dec, ra-sun_ra
     
