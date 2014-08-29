@@ -10,6 +10,11 @@ import astropy.coordinates as co
 import astropy.units as u
 import pyfits
 
+if hasattr(co, 'ICRS'):
+    icrs = co.ICRS
+else:
+    icrs = co.ICRSCoordinates
+
 def flt_zodi(image='ibhm04alq_flt.fits', verbose=True, pirzkal=False):
     from subprocess import Popen,PIPE
 
@@ -89,11 +94,11 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     #return dec-sun_dec, ra-sun_ra
     
     #ra, dec = 34.440618, -5.1721396
-    eq = co.ICRSCoordinates(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    eq = icrs(ra=ra, dec=dec, unit=(u.deg, u.deg))
     equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
     eclip_obs = ephem.Ecliptic(equat)
     
-    eq = co.ICRSCoordinates(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
+    eq = icrs(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
     equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
     eclip_sun = ephem.Ecliptic(equat)
     

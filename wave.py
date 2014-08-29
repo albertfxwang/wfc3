@@ -249,6 +249,149 @@ def find_zeroth():
     xin = np.array(xin).T
     yin = np.array(yin).T
     yout = np.array(yout).T
+
+def ic5117():
+    """
+    Check grism overlap with IC-5117 observations (13582)
+    """
+   import threedhst
+   import numpy as np
+   import glob
+   import os
+   import pyfits
+   os.chdir('/Users/brammer/WFC3/Calibration/Cycle21/13582_Wavelength/PREP_FLT')
+    
+    asn = threedhst.utils.ASNFile('dummy_asn.fits')
+    files=glob.glob('*flt.fits')
+    for file in files:
+        asn.exposures = [file.split('_flt')[0]]
+        im = pyfits.open(file, mode='update')
+        filt=im[0].header['FILTER']
+        iref = os.getenv('iref')
+        if filt in ['F098M','F127M','F105W','G102']:
+            gr = 'b'
+            flat = pyfits.open(os.path.join(iref, 'uc72113oi_pfl.fits'))
+        else:
+            gr = 'r'
+            flat = pyfits.open(os.path.join(iref, 'uc721143i_pfl.fits'))
+        #
+        if 'FLAT' not in im[0].header.keys():
+            im[0].header['FLAT'] = os.path.basename(flat.filename())
+            im[1].data /= flat[1].data[5:-5,5:-5]
+            im[1].data -= np.median(im[1].data)
+            im.flush()
+        #
+        asn.product = 'IC5117%s-%s' %(gr, filt)
+        asn.write('%s_asn.fits' %(asn.product))
+        
+    
+    unicorn.reduce.interlace_combine('IC5117b-F105W', view=False, growx=1, growy=1, auto_offsets=True)
+    unicorn.reduce.interlace_combine('IC5117b-F098M', view=False, growx=1, growy=1, auto_offsets=True)
+    unicorn.reduce.interlace_combine('IC5117b-G102', view=False, growx=1, growy=1, auto_offsets=True)
+
+    unicorn.reduce.interlace_combine('IC5117r-F140W', view=False, growx=1, growy=1, auto_offsets=True)
+    unicorn.reduce.interlace_combine('IC5117r-G141', view=False, growx=1, growy=1, auto_offsets=True)
+    
+    model = unicorn.reduce.GrismModel('IC5117r', grism='G141', direct='F140W', growx=1, growy=1)
+    model.twod_spectrum(114, miny=-80, refine=False, extract_1d=True)
+    model.show_2d(savePNG=True)
+    
+    os.system('ln -s IC5117r_inter_seg.fits IC5117b_inter_seg.fits')
+    os.system('ln -s IC5117r_inter.reg IC5117b_inter.reg')
+    os.system('ln -s IC5117r_inter.cat IC5117b_inter.cat')
+
+    model = unicorn.reduce.GrismModel('IC5117b', grism='G102', direct='F105W', growx=1, growy=1)
+    model = unicorn.reduce.GrismModel('IC5117b', grism='G102', direct='F098M', growx=1, growy=1)
+    model.twod_spectrum(114, miny=-80, refine=False, extract_1d=True)
+    model.show_2d(savePNG=True)
+    
+    #
+    gris = unicorn.interlace_fit.GrismSpectrumFit('IC5117b_00114', skip_photometric=True)
+    rx, ry = np.loadtxt('rudy_spec.dat', unpack=True)
+    gris.twod.compute_model(rx+7, ry/1.e-17/gris.twod.total_flux) #, norm=False)
+
+    gris = unicorn.interlace_fit.GrismSpectrumFit('IC5117r_00114', skip_photometric=True)
+    rx, ry = np.loadtxt('rudy_spec.dat', unpack=True)
+    gris.twod.compute_model(rx-20, ry/1.e-17/gris.twod.total_flux) #, norm=False)
+    
+    twod = gris.twod    
+    w, f = twod.optimal_extract(twod.im['SCI'].data)
+    plt.plot(w, f/twod.im['SENS'].data, color='black', alpha=0.8, linewidth=2)
+    w, f = twod.optimal_extract(twod.model)
+    plt.plot(w, f/twod.im['SENS'].data, color='red', alpha=0.8, linewidth=2)
+    #plt.plot(nd.shift(w, 1), (f/twod.im['SENS'].data), color='orange', alpha=0.8, linewidth=2)
+    
+    plt.xlim(8000,1.6e4)
+    plt.semilogy()
+    plt.ylim(500, 3.5e4)
+    
+    t = table.read('rudy_table1.dat.txt', format='ascii.cds')
+    
+    cont = S.FlatSpectrum(6e-11*1.e-4*1.e-8, fluxunits='photlam')
+    
+    templ = np.ones((len(t), len(w)))
+    use = np.zeros(len(t))
+    
+    for i in range(len(t)):
+        line = t[i]
+        if line['f_Ratio'] == 'Atmosphere':
+            continue
+        #
+        if line['Ratio'] < 0.02:
+            continue
+        #
+        use[i] = 1
+        spec = cont + S.GaussianSource(line['Ratio']*4.95e-12, line['Wave']*1., line['Wave']*800./3.e5, fluxunits='photlam')
+        gris.twod.compute_model(spec.wave, spec.flux/1.e-17/gris.twod.total_flux) #, norm=False)
+        w, f = twod.optimal_extract(twod.model)
+        templ[i,:] = f
+        
+    ok = use > 0
+    templ = templ[ok,:]
+    cont = S.FlatSpectrum(6e-11*1.e-4, fluxunits='photlam')
+    gris.twod.compute_model(cont.wave, cont.flux/1.e-17/gris.twod.total_flux) #, norm=False)
+    w, f = twod.optimal_extract(twod.model)
+    templ[0,:] = f
+    
+    wobs, fobs = twod.optimal_extract(twod.im['SCI'].data)
+    var = 1./twod.im['SENS'].data
+    var = (var/var.min()*0.01*fobs.max())**2
+    var = (var/var.min()*0.001*fobs.max())**2 ### for blue
+    
+    amatrix = unicorn.utils_c.prepare_nmf_amatrix(var, templ)
+    coeff = unicorn.utils_c.run_nmf(fobs, var, templ, amatrix, verbose=True, toler=1.e-10)
+    plt.plot(wobs, fobs/twod.im['SENS'].data, color='black', alpha=0.8, linewidth=2)
+    sum = np.dot(coeff, templ)
+    plt.plot(wobs, sum/twod.im['SENS'].data, color='red', alpha=0.8, linewidth=2)
+    sum2 = np.dot(coeff*0+1, templ)
+    plt.plot(wobs, sum2/twod.im['SENS'].data, color='green', alpha=0.8, linewidth=2)
+    
+    #sum = np.dot(coeff*0+1, templ)
+    
+def rudy_ic5117():
+    """
+    Make a simple spectrum from the line table from Rudy et al.
+    """
+    from astropy.table import Table as table
+    import pysynphot as S
+    t = table.read('rudy_table1.dat.txt', format='ascii.cds')
+    
+    spec = S.FlatSpectrum(6e-11*1.e-4, fluxunits='photlam')
+    #spec.convert('photlam')
+    for line in t:
+        if line['f_Ratio'] == 'Atmosphere':
+            continue
+        #
+        #spec += S.GaussianSource(line['Ratio']*4.95e-12, line['Wave']*1., line['Wave']*30./3.e5, fluxunits='photlam')
+        if line['Wave'] == 10830:
+            f = 1.35
+        else:
+            f = 1.
+        #
+        spec += S.GaussianSource(line['Ratio']*4.95e-12*f, line['Wave']*1., line['Wave']*800./3.e5, fluxunits='photlam')
+    
+    ok = (spec.wave > 7000) & (spec.wave < 1.7e4)
+    np.savetxt('rudy_spec.dat', np.array([spec.wave[ok], spec.flux[ok]]).T, fmt='%.5e')
     
 def predict_zeroth(xc, yc, new=False, grism='G141', force=False):
     import unicorn
@@ -279,7 +422,159 @@ def predict_zeroth(xc, yc, new=False, grism='G141', force=False):
     x0 = (1.4e4 - dldp_0)/dldp_1 + xoff_beam
     return xc + x0, yc + yoff_beam
     
+def offset_position():
+    """
+    Check grism extractions for 13580 program that put Vy2-2 just
+    off of the left edge of the frame to test extrapolation of wavelength
+    calibration.
+    """
     
+    import astropy.io.fits as pyfits
+    from astropy.table import Table as table
     
+    import drizzlepac
+    from drizzlepac import tweakreg, tweakback
+    import stwcs
     
+    import unicorn
+    
+    unicorn.candels.make_asn_files(uniquename=True)
+    
+    info = table.read('files.info', format='ascii.commented_header')
+    
+    for filter in ['F098M', 'F105W']:
+        filter_files = list(info['FILE'][info['FILTER'] == filter])
+        #
+        files = glob.glob('VY2-2*%s_asn.fits' %(filter))
+        for file in files:
+            prep.prep_direct_grism_pair(direct_asn=file, grism_asn=False, radec='2mass.radec', scattered_light=False, skip_direct=False)  
+        #
+        driz_images = glob.glob('VY2-2*%s_drz_sci.fits' %(filter))
+        tweakreg.TweakReg(driz_images, refimage=driz_images[0], updatehdr=True, updatewcs=True, catfile=None, xcol=2, ycol=3, xyunits='pixels', refcat=None, refxcol=1, refycol=2, refxyunits='degrees', shiftfile=True, outshifts='%s_shifts.txt' %(filter), outwcs='%s_wcs.fits' %(filter), searchrad=5, tolerance=12, wcsname='TWEAK', interactive=False, residplot='No plot', see2dplot=False, clean=True, headerlet=True, clobber=True)
+        tweakback.tweakback(driz_images[1])
+        #
+        drizzlepac.astrodrizzle.AstroDrizzle(filter_files, output='VY22-%s' %(filter),  clean=True, skysub=False, final_scale=None, final_pixfrac=1, context=False, final_bits=576, preserve=False, driz_cr_snr='5.0 4.0', driz_cr_scale = '2.5 0.7')
+        drizzlepac.astrodrizzle.AstroDrizzle(filter_files, output='VY22-%s' %(filter), clean=True, context=False, preserve=False, skysub=True, driz_separate=False, driz_sep_wcs=False, median=False, blot=False, driz_cr=False, driz_combine=True)
+        
+    ### Put WCS from direct F105W images into G102 at same POS-TARG
+    info = table.read('files.info', format='ascii.commented_header')
+    
+    idx = np.arange(len(info))[info['FILTER'] == 'F105W']
+    asn = threedhst.utils.ASNFile('../RAW/ibhj01030_asn.fits')
+    
+    for i in idx:
+        direct = info['FILE'][i]
+        dx, dy = info['POSTARG1'][i], info['POSTARG2'][i]
+        ix_gris = (info['POSTARG1'] == dx) & (info['POSTARG2'] == dy) & (info['FILTER'] == 'G102')
+        grism = info['FILE'][ix_gris][0]
+        sign = {True:'+', False:'-'}
+        #
+        asn.product = 'VY22%s%02d%s%02d-F105W' %(sign[dx > 0], np.abs(dx), sign[dy > 0], np.abs(dy))
+        asn.exposures = [direct.split('_flt')[0]]
+        asn.write(asn.product + '_asn.fits')
+        #
+        asn.product = 'VY22%s%02d%s%02d-G102' %(sign[dx > 0], np.abs(dx), sign[dy > 0], np.abs(dy))
+        asn.exposures = [grism.split('_flt')[0]]
+        asn.write(asn.product + '_asn.fits')
+        #### update WCS header
+        imd = pyfits.open(direct)
+        img = pyfits.open(grism)
+        sci_ext=1
+        direct_WCS = stwcs.wcsutil.HSTWCS(imd, ext=sci_ext)
+        drizzlepac.updatehdr.update_wcs(grism, sci_ext, direct_WCS, verbose=True)    
+        
+    #### Make reference catalog
+    root = 'VY22-F105W'
+    se = threedhst.sex.SExtractor()
+    se.aXeParams()
+    se.copyConvFile()
+    se.overwrite = True
+    se.options['CHECKIMAGE_TYPE'] = 'SEGMENTATION, BACKGROUND'
+    se.options['CHECKIMAGE_NAME'] = '%s_drz_seg.fits, %s_drz_bkg.fits' %(root, root)
+    se.options['WEIGHT_TYPE']     = 'MAP_WEIGHT'
+    se.options['WEIGHT_IMAGE']    = '%s_drz_wht.fits' %(root)
+    se.options['WEIGHT_GAIN'] = 'Y'
+    se.options['GAIN'] = '0'
+    se.options['FILTER']    = 'Y'
+    se.options['DETECT_THRESH']    = '2.' 
+    se.options['ANALYSIS_THRESH']  = '2.' 
+    se.options['DETECT_MINAREA'] = '10' 
+    se.options['MASK_TYPE'] = 'NONE'
+    se.options['DEBLEND_NTHRESH']    = '64' 
+    se.options['DEBLEND_MINCONT']  = '0.1' 
+    se.options['SEEING_FWHM'] = '0.12'
+    
+    se.options['BACK_TYPE'] = 'MANUAL'
+    se.options['BACKPHOTO_TYPE'] = 'LOCAL'
+    
+    se.options['MAG_ZEROPOINT'] = '%.2f' %(unicorn.reduce.ZPs['F105W'])
+    se.options['CATALOG_TYPE']    = 'ASCII_HEAD'
+    se.options['CATALOG_NAME']    = '%s_drz_sci.cat' %(root)
+    status = se.sextractImage('%s_drz_sci.fits[0]' %(root))
+    threedhst.sex.sexcatRegions('%s_drz_sci.cat' %(root), '%s_drz_sci.reg' %(root), format=1)
+    
+    #### Make interlaced images
+    files = glob.glob('VY22[+-]??[+-]??-F105W_asn.fits')
+    for file in files:
+        unicorn.reduce.interlace_combine(file.split('_asn')[0], growx=1, growy=1, NGROW=50, pad=60, view=False)
+        unicorn.reduce.interlace_combine(file.split('_asn')[0].replace('F105W', 'G102'), growx=1, growy=1, NGROW=50, pad=60, view=False)
+        red = unicorn.reduce
+        red.adriz_blot_from_reference(pointing=file.split('_asn')[0], pad=60, NGROW=50, growx=1, growy=1, auto_offsets=False, ref_exp=0, ref_image='VY22-F105W_drz_sci.fits', ref_ext=0, ref_filter='F105W', seg_image='VY22-F105W_drz_seg.fits', cat_file='VY22-F105W_drz_sci.cat')
+    
+    ### extract spectra
+    id = 798
+    files = glob.glob('VY22[+-]??[+-]??-F105W_asn.fits')
+    for file in files:
+        model = unicorn.reduce.GrismModel(root=file.split('-F10')[0], direct='F105W', grism='G102', growx=1, growy=1, grow_factor=1)
+        model.twod_spectrum(id, miny=-30, refine=False, CONTAMINATING_MAGLIMIT=0)
+        
+    files = glob.glob('*2D.fits')
+    yi, xi = np.indices((30,30))
+    xs, ys = np.zeros(len(files)), np.zeros(len(files))
+    xpix = xs*0
+    for i, file in enumerate(files):
+        twod = unicorn.reduce.Interlace2D(file)
+        xs[i] = np.sum(xi*twod.im['DSCI'].data/twod.im['DSCI'].data.sum())
+        ys[i] = np.sum(xi*twod.im['DSCI'].data/twod.im['DSCI'].data.sum())
+        xpix[i] = twod.im[0].header['X_PIX']
+        
+    xs -= np.median(xs) #+ 0.5
+    ys -= np.median(ys)
+    
+    #xs -= 0.5
+    
+    fig = plt.figure(figsize=[16,4])
+    fig.subplots_adjust(left=0.04, right=0.98, top=0.92)
+    for i, file in enumerate(files):
+        twod = unicorn.reduce.Interlace2D(file)
+        w, f = twod.optimal_extract(twod.im['SCI'].data)
+        c = {True: 'red', False: 'blue'}
+        #plt.plot(w-np.diff(w)[0]*xs[i], f/twod.im['SENS'].data, alpha=0.5, marker='o', ms=2, label='%s, %s' %(file[4:7], file[7:10])) # , color=c['2-2' in file]
+        ff = f*0.
+        for k in range(ff.shape[0]):
+            y0 = int(np.round(twod.im['YTRACE'].data[k]))
+            ff[k] = np.sum(twod.im['SCI'].data[y0-4:y0+4, k])
+        #
+        plt.plot(w-np.diff(w)[0]*xs[i], ff/twod.im['SENS'].data, alpha=0.5, marker='o', ms=2, label='%s, %s' %(file[4:7], file[7:10])) # , color=c['2-2' in file]
+        #plt.plot(twod.oned.data['wave']-np.diff(w)[0]*xs[i], twod.oned.data['flux']/twod.oned.data['sensitivity'], alpha=0.5, marker='o', ms=2, label='%s, %s' %(file[4:7], file[7:10])) # , color=c['2-2' in file]
+        #
+        print file, np.diff(w)[0]
+        #ds9.frame(i+1)
+        #ds9.view(twod.im['DSCI'].data)
+    
+    PNe_lines = [9071.403457, 9534.921052, 10049.850283, 10833.000000, 12821.000000, 16112.000000, 16412.000000]
+    for line in PNe_lines:
+        plt.plot([line, line], [0.1,1.e5], color='black', linewidth=3, alpha=0.2, zorder=-5)
+        
+    #plt.plot(w-np.diff(w)[0]*xs[i]-np.diff(w)[0], f/twod.im['SENS'].data, alpha=0.5, color='green', marker='o', ms=2)
+    plt.legend(loc='upper right', prop={'size':9}, title='POS-TARG')
+    plt.title('VY2-2, G102, 13580')
+    plt.xlim(8500, 11500)
+    plt.ylim(700,14000)
+    plt.ylim(600,64000)
+    plt.semilogy()
+    plt.xlabel(r'$\lambda$')
+    plt.savefig('vy22-edge_v2.pdf') #, dpi=100)
+    
+    plt.close()
     

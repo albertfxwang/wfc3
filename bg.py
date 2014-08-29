@@ -259,7 +259,7 @@ def compute_shadow(root='ib5x15vlq', save_fits=False):
             orbit.addColumn('in_shadow', in_shadow*1)
             orbit.write_text(orbit.filename)
             
-def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw'):
+def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw', tstr=None):
     
     import scipy.ndimage as nd
     import mywfc3.utils
@@ -326,7 +326,8 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw
         pstr = astropy.time.Time(spt['PSTRTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
         pstp = astropy.time.Time(spt['PSTPTIME'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
         if i == 0:
-           tstr = pstr
+           if tstr is None:
+               tstr = pstr
         #
         ax1.text(0.05+0.14*(i % 4), 0.95-0.08*(i/4), expname, ha='left', va='top', color=colors[i], transform=ax1.transAxes, size=9)
         #### Plot curves
@@ -455,6 +456,8 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw
     #plt.savefig('%s_%s_orbit.png' %(asn[0], FILTER))
     unicorn.plotting.savefig(fig, '%s_%s_orbit.png' %(asn[0], FILTER))
     #plt.close()
+    
+    return tstr
     
 def init_map(ax=None):
     import mpl_toolkits.basemap as bm
@@ -1311,6 +1314,11 @@ def get_sun_angle():
     import astropy.units as u
     import cPickle as pickle
     
+    if hasattr(c, 'ICRS'):
+        icrs = c.ICRS
+    else:
+        icrs = c.ICRSCoordinates
+        
     #h = pyfits.getheader(spt)
     
     sun = catIO.Readfile('sun_coords.dat', save_fits=False, force_lowercase=False)
@@ -1321,8 +1329,8 @@ def get_sun_angle():
         key = sun.FILE[i].split('_spt')[0]
         ra, dec = sun.RA_TARG[i], sun.DEC_TARG[i]
         ra_sun, dec_sun = sun.RA_SUN[i], sun.DEC_SUN[i]
-        c_targ = c.ICRSCoordinates(ra, dec, unit=(u.deg, u.deg))
-        c_sun = c.ICRSCoordinates(ra_sun, dec_sun, unit=(u.deg, u.deg))
+        c_targ = icrs(ra, dec, unit=(u.deg, u.deg))
+        c_sun = icrs(ra_sun, dec_sun, unit=(u.deg, u.deg))
         sun_angle[key] = c_targ.separation(c_sun).degrees #value
     #
     fp = open('f105w_sun_coords.pkl','wb')
@@ -1801,6 +1809,11 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     import astropy.coordinates as co
     import astropy.units as u
     
+    if hasattr(co, 'ICRS'):
+        icrs = co.ICRS
+    else:
+        icrs = co.ICRSCoordinates
+    
     import subprocess
     #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
     # fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','wb')
@@ -1841,8 +1854,8 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     ra_sun = np.interp(jd, hjd-24.e5-0.5, hra)
     dec_sun = np.interp(jd, hjd-24.e5-0.5, hdec)
         
-    eq_targ = co.ICRSCoordinates(ra=ra, dec=dec, unit=(u.deg, u.deg))
-    eq_sun = co.ICRSCoordinates(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
+    eq_targ = icrs(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    eq_sun = icrs(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
     
     # ra_antisun = ra_sun - 180
     # if ra_antisun < 0:
@@ -2003,8 +2016,10 @@ def future_ephem():
     os.system('cat ephem_jun17_13496.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jun17_13496.reform')
 
     os.system('cat ephem_jun17_13498.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jun17_13498.reform')
+
+    os.system('cat ephem_upcoming_13504_aug14.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_13504_aug14.reform')
     
-    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_jun17_13498.reform', unpack=True, dtype=np.str)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_13504_aug14.reform', unpack=True, dtype=np.str)
     
     #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
     
@@ -2012,7 +2027,10 @@ def future_ephem():
     ttag = []
     for tt in e_ttag:
         ttag.append('2014:'+tt)
-        
+    
+    # for tt in ttag:
+    #     times = t.Time(tt, scale='utc', format='yday')
+            
     times = t.Time(ttag, scale='utc', format='yday')
     
     skip = ['SAA27_EXIT', 'SAA27_ENTRY', 'SAA30_EXIT', 'TGT_AVD_ENTRY', 'FGS_AVD_EXIT', 'FGS_AVD_ENTRY', 'SHADOW_EXIT']

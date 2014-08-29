@@ -1068,7 +1068,58 @@ def background_components():
         plt.plot(beam_sum[i, -xi[0]-left:-xi[0]-left+1014] / norm, alpha=0.5, label='BEAM: '+'ABCDE'[i])
         
     
-            
+def test_results():
+    """
+    Run my and Nor's test datasets
+    """
+    
+    roots = ['ibhj02l0q', 'ibhj02leq', 'icdx02vzq', 'icdx03w7q', 'icdx04iwq', 'icdx05jxq', 'icdx05jzq', 'icdx06dbq', 'icdx06ddq', 'icdx07ecq', 'icdx07eeq', 'icdx08enq', 'icdx08epq', 'icdx09j4q']
+    
+    FORCE=False
+    for root in roots:
+        if os.path.exists('%s_flt.fits' %(root)) & (not FORCE):
+            continue
+        #
+        #unicorn.prepare.show_MultiAccum_reads('%s_raw.fits' %(root))
+        unicorn.prepare.make_IMA_FLT(raw='%s_raw.fits' %(root), pop_reads=[], remove_ima=True)
+        
+    #
+    unicorn.candels.make_asn_files(uniquename=True)
+    
+    sky_images = {'G141':['zodi_G141_clean.fits', 'excess_lo_G141_clean.fits', 'G141_scattered_light.fits'],
+                  'G102':['zodi_G102_clean.fits', 'excess_G102_clean.fits']}
+    
+    FORCE=False
+    
+    files=glob.glob('*-G141*asn.fits')
+    files=glob.glob('*-G102*asn.fits')
+    
+    files=files[2:3]
+    for file in files:
+        #if os.path.exists(file.replace('asn','drz')):
+        #    continue
+        #
+        if 'G102' in file:
+            sky = sky_images['G102']
+        else:
+            sky = sky_images['G141']
+        #
+        if os.path.exists(file.replace('asn','drz')) & (not FORCE):
+            continue
+        #
+        if not os.path.exists(file.replace('G141', 'F160W').replace('G102', 'F110W')):
+            print 'No direct image found: %s' %(file)
+            continue
+        #
+        threedhst.shifts.make_blank_shiftfile(file.replace('G141', 'F140W').replace('G102', 'F110W'), xshift=0, yshift=0, rot=0.0, scale=1.0)
+        threedhst.shifts.make_blank_shiftfile(file, xshift=0, yshift=0, rot=0.0, scale=1.0)
+        threedhst.prep_flt_files.process_3dhst_pair(file.replace('G141', 'F140W').replace('G102', 'F110W'), file, ALIGN_IMAGE = None, SKIP_GRISM=False, GET_SHIFT=False, SKIP_DIRECT=True, align_geometry='rotate, shift', TWEAKSHIFTS_ONLY=False, adjust_targname=False, sky_images=sky, DIRECT_HIGHER_ORDER=0, GRISM_HIGHER_ORDER=0, final_scale=0.1283, clean_drz=False)
+        
+    #
+    
+    
+    
+          
         
         
               
