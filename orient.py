@@ -5,7 +5,7 @@ Compute POS-TARG offsets for maximum overlap of 100% spectra
 import numpy as np
 import matplotlib.pyplot as plt
 
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point, MultiPolygon, LineString
 from descartes import PolygonPatch
 
 import unicorn
@@ -14,7 +14,7 @@ import threedhst
 def overlap(theta=90, grism='G102', have_mosaic=True, plot=True, aper='GRISM1024', f_spec=1, ax=None, get_postargs=False, recenter_target=False):
             
     refpix_aper = {'GRISM1024':[497, 562], 'IR':[562, 562], 'IR-FIX': [512,512]}
-    disp_box_aper = {'G102': [53, 308], 'G141': [36, 168]}
+    disp_box_aper = {'G102': [53, 210], 'G141': [36, 168]}
 
     #### Pixel scale
     ps = {'x':0.1355, 'y':0.1211} 
@@ -22,21 +22,26 @@ def overlap(theta=90, grism='G102', have_mosaic=True, plot=True, aper='GRISM1024
     refpix = np.array(refpix_aper[aper])
     disp_box = np.array(disp_box_aper[grism])
     
-    disp_box[1] -= np.diff(disp_box)*(1-f_spec)
+    spec_width = np.diff(disp_box)[0]
+    #disp_box[1] -= spec_width*(1-f_spec) + disp_box[0]
+    right = 1014 - disp_box[0] - spec_width*(f_spec)
     
     #### Assume have direct imaging at 
     if have_mosaic:
-        disp_box[0] = 0
+        left = (-1*disp_box[0]) - spec_width*(1-f_spec)
+    else:
+        left = 0 #- spec_width*(1-f_spec)
     
     #### Full box: full WFC3/IR
     full_box_x = np.array([0, 1014, 1014, 0, 0])*ps['x']
     full_box_y = np.array([0, 0, 1014, 1014, 0])*ps['y']
     
-    sub_box_x = np.array([disp_box[0], 1014-disp_box[1], 1014-disp_box[1], disp_box[0], disp_box[0]])*ps['x']
+    #sub_box_x = np.array([disp_box[0], 1014-disp_box[1], 1014-disp_box[1], disp_box[0], disp_box[0]])*ps['x']
+    sub_box_x = np.array([left, right, right, left, left])*ps['x']
     sub_box_y = full_box_y*1.
     
     #### Center of rotation of sub box
-    sub_center_x = (1014-disp_box[1]-disp_box[0])/2.*ps['x'] + disp_box[0]
+    sub_center_x = ((right-left)/2.+left)*ps['x']
     sub_center_y = 1014./2*ps['y']
     
     #### Center of rotation for aperture
@@ -47,6 +52,8 @@ def overlap(theta=90, grism='G102', have_mosaic=True, plot=True, aper='GRISM1024
     if recenter_target:
         recenter_x = aper_center_x - sub_center_x
         recenter_y = aper_center_y - sub_center_y        
+        
+        print 'Recenter POSTARGs: %.3f %.3f' %(-recenter_x, -recenter_y)
         
         full_box_x += recenter_x
         full_box_y += recenter_y
@@ -129,7 +136,7 @@ def show_all():
     
     f_spec = 0.75
     for i in thetas:
-        result = mywfc3.orient.overlap(theta=thetas[i], grism='G102', have_mosaic=True, plot=False, aper='GRISM1024', f_spec=f_spec)
+        result = mywfc3.orient.overlap(theta=thetas[i], grism='G102', have_mosaic=False, plot=False, aper='GRISM1024', f_spec=f_spec)
         area_aper[i], area_cov[i] = result[2], result[5] 
         
     plt.plot(thetas, area_aper, label='APER', color='red')
@@ -183,9 +190,15 @@ def show_all():
     #### Exposure maps
     results = []
     for theta in np.cast[int](ORIENTS-np.median(ORIENTS))[so]:
-        result = mywfc3.orient.overlap(theta=theta, grism='G102', have_mosaic=True, plot=False, aper='GRISM1024', f_spec=f_spec, recenter_target=True)
+        result = mywfc3.orient.overlap(theta=theta, grism='G102', have_mosaic=True, plot=False, aper='GRISM1024', f_spec=f_spec, recenter_target=False)
         results.append(result)
+    #
+    # results = []
+    # for theta in np.arange(0,361,10):
+    #     result = mywfc3.orient.overlap(theta=theta, grism='G102', have_mosaic=False, plot=False, aper='GRISM1024', f_spec=f_spec, recenter_target=False)
+    #     results.append(result)
     
+    alpha = 1./len(results)*1.5
     ### No rotation
     j=0
     
@@ -206,12 +219,12 @@ def show_all():
     for result in results:
         if rot == 'APER':
             full_poly, sub_poly = result[0], result[1]
-            full_patch = PolygonPatch(full_poly, fc='None', ec='red', alpha=0.2, zorder=2)
-            sub_patch = PolygonPatch(sub_poly, fc='red', ec='red', alpha=0.2, zorder=2)
+            full_patch = PolygonPatch(full_poly, fc='None', ec='red', alpha=alpha, zorder=2)
+            sub_patch = PolygonPatch(sub_poly, fc='red', ec='red', alpha=alpha, zorder=2)
         else:
             full_poly, sub_poly = result[3], result[4]
-            full_patch = PolygonPatch(full_poly, fc='None', ec='blue', alpha=0.2, zorder=2)
-            sub_patch = PolygonPatch(sub_poly, fc='blue', ec='blue', alpha=0.2, zorder=2)
+            full_patch = PolygonPatch(full_poly, fc='None', ec='blue', alpha=alpha, zorder=2)
+            sub_patch = PolygonPatch(sub_poly, fc='blue', ec='blue', alpha=alpha, zorder=2)
         #   
         ax.add_patch(full_patch)
         ax.add_patch(sub_patch)
@@ -227,7 +240,155 @@ def show_all():
     
     unicorn.plotting.savefig(fig, 'orient_full_depth.pdf')
     
+    result = mywfc3.orient.overlap(theta=0, grism='G102', have_mosaic=True, plot=False, aper='GRISM1024', f_spec=f_spec, recenter_target=True)
+    
+def ISR_figures_demo():
+    
+    import mywfc3.orient
+    #### Pixel scale
+    ps = {'x':0.1355, 'y':0.1211} 
+    #### dispersion offsets
+    disp_box = {'G102': [53, 210], 'G141': [36, 168]}
+    #### Apertures
+    refpix_aper = {'GRISM1024':[497, 562], 'IR':[562, 562], 'IR-FIX': [512,512]}
+    
+    grism = 'G102'
+    aper = 'GRISM1024'
+    
+    #### Demo
+    fig = unicorn.plotting.plot_init(xs=11, aspect=1./4, square=True, left=0.01, bottom=0.01, right=0.01, top=0.01, use_tex=True, NO_GUI=True)
+    
+    theta_pairs = [[-20], [50], [160], [-20,50,160]]
+    
+    dx = 0.99/len(theta_pairs)
+    
+    for i in range(len(theta_pairs)):
+        
+        ax = fig.add_axes((0.005+i*(dx+0*0.005),0.01, dx, 0.97))    
+        
+        if i < 3:
+            ax.text(0.5, 0.05, r'PA($y$) = %d' %(-theta_pairs[i][0]), transform=ax.transAxes, ha='center', va='bottom')
+        else:
+            ax.text(0.5, 0.05, r'PA($y$) = %d $\times$ %d $\times$ %d' %(-theta_pairs[i][0], -theta_pairs[i][1], -theta_pairs[i][2]), transform=ax.transAxes, ha='center', va='bottom')
+            
+        ax.scatter(refpix_aper[aper][0]*ps['x'],refpix_aper[aper][1]*ps['y'], color='purple', marker='x', s=60, label=aper)
+        plt_range = np.array([-72, 180])*0.95
+        ax.set_xlim(plt_range+10); ax.set_ylim(plt_range+10)
+        ax.set_xticklabels([]); ax.set_yticklabels([])
+        ax.set_xticks(ax.get_xlim()); ax.set_yticks(ax.get_ylim())
+        
+        ax.plot([-1000,-1100],[-1110,-1100], color='green', alpha=0.4, linewidth=2, label=grism)
+        
+        if i == 0:
+            ax.legend(scatterpoints=1, loc='upper left', fontsize=10)
+            
+        #theta = 70
+        pair = theta_pairs[i]
+        results = []
+        for theta in pair:
+            result = mywfc3.orient.overlap(theta=theta, grism=grism, have_mosaic=True, plot=False, aper='GRISM1024', f_spec=0.5, recenter_target=False)
+            results.append(result)
+        
+        overlap_region = results[0][1].intersection(results[0][1])
+        for result in results:
+            overlap_region = overlap_region.intersection(result[1])
+            
+        for j in range(len(pair)):
+            full_poly, sub_poly = results[j][0], results[j][1]            
+            full_patch = PolygonPatch(full_poly, fc='None', ec='black', alpha=0.9, zorder=-2)
+            sub_patch = PolygonPatch(sub_poly, fc='black', ec='black', alpha=0.2, zorder=-2)
+            
+            ax.add_patch(full_patch)
+            ax.add_patch(sub_patch)
+                        
+            ### Death star
+            xds, yds = threedhst.utils.xyrot(np.array([357,357])*ps['x'], np.array([55,55])*ps['y'], pair[j], x0=refpix_aper[aper][0]*ps['x'], y0=refpix_aper[aper][1]*ps['y'])
+            ds = Point(xds[0], yds[0]).buffer(20*ps['x'])
+            ds_patch = PolygonPatch(ds, fc='None', ec='black', alpha=0.9, zorder=-2)
+            ax.add_patch(ds_patch)
+            
+            if i == 3:
+                isect_patch = PolygonPatch(overlap_region, fc='green', ec='green', alpha=0.2, zorder=1)
+                ax.add_patch(isect_patch)
+                
+            else:
+                for xi in np.arange(-15, 180, 33):
+                    for yi in np.arange(15, 180, 30):
+                        pi = Point((xi, yi))
+                        if pi.intersects(overlap_region):
+                            ax.scatter(xi, yi, color='green', alpha=0.8, zorder=1)
+                            trace_x = xi+np.array(disp_box[grism])*ps['x']
+                            trace_y = np.array([yi,yi])
+                            trace_x, trace_y = threedhst.utils.xyrot(trace_x, trace_y, pair[j], x0=xi, y0=yi)
+                            #ax.plot(trace_x, trace_y, color='green', alpha=0.4, linewidth=2, zorder=1)
+                            trace_line = LineString([(trace_x[0], trace_y[0]), (trace_x[1], trace_y[1])])
+                            trace_in_full = trace_line.buffer(1, resolution=8)
+                            ax.add_patch(PolygonPatch(trace_in_full, fc='black', ec='None', alpha=0.15, zorder=1))
+                            trace_in_full = trace_line.buffer(1, resolution=8).intersection(full_poly)
+                            ax.add_patch(PolygonPatch(trace_in_full, fc='green', ec='None', alpha=0.5, zorder=1))
+                            
+    unicorn.plotting.savefig(fig, 'orient_demo.pdf')
+
+    #### Testing
+    if False:
+        line = LineString([(-2,0.5), (0.5, 0.5)])
+        full_box_x = np.array([0, 1, 1, 0, 0])
+        full_box_y = np.array([0, 0, 1, 1, 0])
+        box = Polygon(np.array([full_box_x, full_box_y]).T)
+        line_within = line.buffer(0.02, resolution=8).intersection(box)
+        
+        plt.figure()
+        ax = plt.gca()
+        ax.add_patch(PolygonPatch(box, fc='black', ec='black', alpha=0.2, zorder=-2))
+        ax.add_patch(PolygonPatch(line_within, fc='green', ec='None', alpha=0.2, zorder=-1))
+        plt.xlim(-2,2)
+        plt.ylim(-2,2)
         
         
+def ISR_figures_coverage():
+    """
+    Show overlap coverage with/without shifting
+    """
+    
+    from matplotlib.ticker import MultipleLocator, FormatStrFormatter
+    
+    thetas = np.arange(-180, 181, 2)
+    area_aper = thetas*0.
+    area_cov = thetas*0.
+    
+    f_spec = 0.5
+
+    fig = unicorn.plotting.plot_init(xs=8, aspect=1./2, square=True, left=0.09, wspace=0., bottom=0.1, right=0.01, top=0.01, use_tex=True, NO_GUI=True)
+    
+    ax, grism = fig.add_subplot(121), 'G102'
+    ax, grism = fig.add_subplot(122), 'G141'
+    
+    for i in thetas:
+        result = mywfc3.orient.overlap(theta=thetas[i], grism=grism, have_mosaic=True, plot=False, aper='GRISM1024', f_spec=f_spec)
+        area_aper[i], area_cov[i] = result[2], result[5] 
         
+    ax.plot(thetas, area_aper, label='GRISM1024', color='red')
+    ax.plot(thetas, area_cov, label='Recenter', color='blue')
+    
+    for i in thetas:
+        result = mywfc3.orient.overlap(theta=thetas[i], grism=grism, have_mosaic=False, plot=False, aper='GRISM1024', f_spec=f_spec)
+        area_aper[i], area_cov[i] = result[2], result[5] 
         
+    ax.plot(thetas, area_aper, label='GRISM1024, no edge' , color='red', linestyle='--')
+    ax.plot(thetas, area_cov, label='Recenter, no edge', color='blue', linestyle='--')
+    ax.legend(loc='lower center', title=grism + r', $f > %0.2f$' %(f_spec), fontsize=9)
+
+    axes = fig.axes
+    axes[0].set_ylabel('Overlap fraction')
+    axes[1].set_yticklabels([])
+    
+    for ax in axes:
+        ax.set_xlabel(r'$\theta = \Delta$ ORIENT (deg)')
+        ax.xaxis.set_major_locator(MultipleLocator(45))
+        ax.yaxis.set_minor_locator(MultipleLocator(0.05))
+        ax.grid()
+        ax.set_ylim(0.55,1.01)
+    
+    unicorn.plotting.savefig(fig, 'orient_area_fraction.pdf'); plt.close()
+    
+    
