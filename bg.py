@@ -500,8 +500,13 @@ def draw_map_latlon(map, lat, lon, ext=None, *args, **kwargs):
     xpt, ypt = map(lon[0], lat[0])
     map.scatter(xpt, ypt, alpha=0.5, **kwargs)
     if ext is not None:
-        root = ext.header['EXPNAME'][:-1]+'q'
-        az = compute_hst_azimuth(lat[0], lon[0], root=root)
+        try:
+            root = ext.header['EXPNAME'][:-1]+'q'
+            az = compute_hst_azimuth(lat[0], lon[0], root=root)
+        except:
+            root = ext.header['EXPNAME'][:-1]+'s'
+            az = compute_hst_azimuth(lat[0], lon[0], root=root)
+        
         #print az
         dx = np.cos((90-az)/180*np.pi)
         dy = np.sin((90-az)/180*np.pi)
