@@ -46,14 +46,16 @@ def cgs_to_rayleigh(flux_cgs=1.e-16, flux_cps=None, area=0.0164):
     rayleigh = flux_cgs/(3.715e-14/wavelen)/area
     return rayleigh
     
-def go_check(im_ext='raw', force=False):
+def go_check(im_ext='raw', force=False, asn_files=None):
     """
     Generate plots in a particular directory
     """
     import glob
     import mywfc3.bg
     
-    asn_files = glob.glob('*jif.fits*')
+    if asn_files is None:
+        asn_files = glob.glob('*jif.fits*')        
+    
     for asn in asn_files:
         root = asn.split('_jif')[0]
         if (len(glob.glob('%s_*orbit.png' %(root))) == 0) | force:
@@ -309,9 +311,11 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw
     ax3 = fig.add_axes((0.05,0.09+0.28,0.6,0.28))
     
     for i, ext in enumerate(jit):
-        expname = ext.header['EXPNAME'][:-1]+'q'
+        spt_file = glob.glob('%s*spt.fits*' %(ext.header['EXPNAME'][:-1]))[0]
+        expname = spt_file.split('_spt')[0]
+        #expname = ext.header['EXPNAME'][:-1]+'q'
         print expname
-        spt = pyfits.getheader(gzfile(expname+'_spt.fits'), 0)
+        spt = pyfits.getheader(spt_file, 0)
         if i == 0:
             targname = spt['TARGNAME']
             ax3.text(0.5, 0.95, targname, ha='center', va='top', transform=ax3.transAxes)
@@ -350,6 +354,7 @@ def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw
         time, ramp, reads = get_bg_ramp(ima)
         dt = np.diff(time)
         ok = dt > 24
+        ymax = np.maximum(ymax, (ramp/dt*GAIN).max()*1.05)
         ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., (ramp/dt*GAIN)[ok], color=colors[i], linewidth=2)
         ax3.plot(((pstr-tstr).sec + time[1:][ok])/60., ramp[ok]*0+zodi, color='black', linestyle='--', alpha=0.5)
         #
