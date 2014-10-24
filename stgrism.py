@@ -210,7 +210,18 @@ def compare_spectra():
     import mywfc3.stgrism as st
     import unicorn
     
+    ### Fancy colors
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    cmap = sns.cubehelix_palette(as_cmap=True, light=0.95, start=0.5, hue=0.4, rot=-0.7, reverse=True)
+    cmap.name = 'sns_rot'
+    plt.register_cmap(cmap=cmap)
+    sns.set_style("ticks", {"ytick.major.size":3, "xtick.major.size":3})
+    plt.set_cmap('sns_rot')
+    #plt.gray()
+    
     fig = st.compare_methods(x0=787, y0=712, v=np.array([-1.5,4])*0.6, NX=180, NY=40, direct_off=100, final=True, mask_lim = 0.02)
+    #fig.tight_layout()
     unicorn.plotting.savefig(fig, '/tmp/compare_model_star.pdf', dpi=300)
 
     fig = st.compare_methods(x0=485, y0=332, v=np.array([-1.5,4])*0.2, NX=180, NY=40, direct_off=100, final=True, mask_lim = 0.1)
@@ -271,6 +282,9 @@ def compare_methods(x0=787, y0=712, NX=180, NY=40, direct_off=100, final=False, 
     ax.imshow(direct_cutout, interpolation='Nearest', aspect='auto', vmin=v[0]*4, vmax=v[1]*4)
     ax.set_xticklabels([]); ax.set_yticklabels([])
     ax.text(lx, ly, 'F140W', ha=ha, va=va, transform=ax.transAxes, color='white')
+    sh = direct_cutout.shape
+    ax.set_xticks([0,sh[1]]); ax.set_yticks([0,sh[0]])
+    
     ax.text(1-lx, 1-ly, '(%d, %d)' %(x0, y0), ha='right', va='top', transform=ax.transAxes, color='white')
     
     ax = fig.add_subplot(723)
@@ -280,39 +294,52 @@ def compare_methods(x0=787, y0=712, NX=180, NY=40, direct_off=100, final=False, 
     ax.contour(mmask*1., levels=[0.9], colors='r', alpha=0.5)
     ax.set_xticklabels([]); ax.set_yticklabels([])
     ax.text(lx, ly, 'G141', ha=ha, va=va, transform=ax.transAxes, color='white')
+    ax.set_xticks([0,sh[1]]); ax.set_yticks([0,sh[0]])
     
-    labels = ['NP, gauss140', 'NP, gaussAll', 'NP, seg140', 'NP, segAll', 'GBB, seg']
+    labels = ['aXe, gauss140', 'aXe, gaussAll', 'aXe, seg140', 'aXe, segAll', 'threedhst, seg']
     
     for i in range(5):
         ax = fig.add_subplot(7,2,5+i*2)
         ax.imshow(gris_cutout-models[i], interpolation='Nearest', aspect='auto', vmin=v[0], vmax=v[1])
         ax.set_xticklabels([]); ax.set_yticklabels([])
         ax.text(lx, ly, labels[i], ha=ha, va=va, transform=ax.transAxes, color='white')
+        ax.set_xticks([0,sh[1]]); ax.set_yticks([0,sh[0]])
     
     ### Show residual histograms    
-    ax = fig.add_subplot(326)
+    #ax = fig.add_subplot(321)
+    ax = fig.add_axes((0.52, 0.08, 0.45, 0.4))
+    
+    #ax = fig.subplot2grid((6, 2), (0, 1), rowspan=2)
+    
     ok = (gris_cutout != 0) & (gris_err_cutout > 0) & mmask
     for i in range(5):
-        ax.hist(((gris_cutout-models[i])/gris_err_cutout)[ok], bins=100, range=(-10, 10), alpha=0.5, histtype='step', normed=True, label=labels[i])
+        ax.hist(((gris_cutout-models[i])/gris_err_cutout)[ok], bins=50, range=(-10, 10), alpha=0.8, linewidth=2, histtype='step', normed=True, label=labels[i])
     
     xx = np.arange(-10,10,0.1)
     yy = 1/np.sqrt(2*np.pi)*np.exp(-xx**2/2.)
     ax.fill_between(xx, yy, yy*0, color='black', alpha=0.2, zorder=-10)
     ax.legend(loc='upper right', prop=dict(size=8))
     ax.set_yticklabels([])
+    ax.set_xlim(-8,8)
+    ax.set_ylim(0,yy.max())
     ax.set_xlabel(r'Residual ($\sigma$)')
-    
-    
-    ax = fig.add_subplot(322)
+        
+    #ax = fig.add_subplot(326)
+    ax = fig.add_axes((0.52, 0.58, 0.45, 0.4))
     profile = np.sum(gris_cutout*ok, axis=1)
     #ax.plot(profile, color='black')
     xx = np.arange(len(profile))
-    ax.fill_between(xx, profile, profile*0, color='black', alpha=0.2)
+    ax.fill_between(xx-21, profile, profile*0, color='black', alpha=0.2)
     for i in range(5):
         profile = np.sum(models[i]*ok, axis=1)
-        ax.plot(profile, label=labels[i])
+        ax.plot(xx-21, profile, label=labels[i])
     
     ax.set_yticklabels([])
+    #ax.set_xlim(6,36)
+    ax.set_xlim(-15,15)
+    #ax.set_xticks(np.arange(6,37,5))
+    #ax.set_xticklabels(np.arange(6,37,5)-21)
+    
     ax.set_xlabel(r'$y$ pixel')
     
     return fig

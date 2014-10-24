@@ -87,7 +87,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         
     if len(pop_reads) > 0:
         ### Pop out reads affected by satellite trails or earthshine
-        threedhst.showMessage('Pop reads %s from %s' %(pop_reads, ima.filename()))
+        print '\n****\nPop reads %s from %s\n****\n' %(pop_reads, ima.filename())
         
         diff = np.diff(cube, axis=0)
         dt = np.diff(time)
@@ -153,7 +153,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     #### Some earthshine flares DQ masked as 32: "unstable pixels"
     mask = (flt['DQ'].data & 32) > 0
     if mask.sum() > 1.e4:
-        threedhst.showMessage('Take out excessive DQ=32 flags (N=%e)' %(mask.sum()))
+        print '\n****\nTake out excessive DQ=32 flags (N=%e)\n****\n' %(mask.sum())
         flt['DQ'].data[mask] -= 32
         
     ### Update the FLT header
@@ -193,10 +193,10 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
     #(xs=10, aspect=0.8, wspace=0., hspace=0., left=0.05, NO_GUI=True)
     for j in range(1,NSAMP-1):
         ax = fig.add_subplot(4,4,j)
-        ax.imshow(diff[j,:,:]/dt[j]*gain, vmin=0, vmax=4, origin='lower')
+        ax.imshow(diff[j,:,:]/dt[j]*gain, vmin=0, vmax=4, origin='lower', cmap=plt.get_cmap('hot'))
         ax.set_xticklabels([])
         ax.set_yticklabels([])
-        ax.text(20,5,'%d' %(j), ha='left', va='bottom')
+        ax.text(20,5,'%d' %(j), ha='left', va='bottom', backgroundcolor='white')
     #
     ax = fig.add_subplot(4,4,16)
     ramp_cps = np.median(diff, axis=1)

@@ -489,3 +489,170 @@ def excess_statistics():
     #
     unicorn.plotting.savefig(fig, '/tmp/excess_statistics.pdf')
     
+def etc_stats():
+    """
+    Produce some numbers for the ETC
+    
+    e.g., number of excess electrons as a function of exposure time
+    
+    """
+    
+    import glob
+    from threedhst import catIO
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    files=glob.glob('*orbit.dat')
+    N = len(files)
+    texp = np.zeros(N)
+    excess = np.zeros(N)
+    excess_zodi = np.zeros(N)
+    min = np.zeros(N)
+    zodi = np.zeros(N)
+    
+    for i in range(N):
+        print i, files[i]
+        c = catIO.Table(files[i], format='ascii.commented_header')
+        dt = np.diff(c['Seconds'])
+        dt = np.append(dt, dt[-1])
+        tread = c['Seconds'] + dt/2.
+        texp[i] = tread[-1]
+        no_shadow = c['shadow'] == 0
+        excess[i] = ((c['bg']-c['minbg'])*dt)[no_shadow].sum()
+        excess_zodi[i] = ((c['bg']-c['zodi'])*dt)[no_shadow].sum()
+        min[i] = c['minbg'][0]
+        zodi[i] = c['zodi'][0]
+        
+    #
+    plt.scatter(texp+np.random.rand(N)*0.1*texp, excess_zodi/texp, alpha=0.1)
+    stat_levels = [25,50,75,95]
+    stats = np.zeros((3,len(stat_levels)))
+    med_texp = np.zeros(3)
+    for j in range(3):
+        sample = (texp > j*600) & (texp <= (j+1)*600)
+        stats[j,:] = np.percentile((excess_zodi/texp)[sample], stat_levels)
+        med_texp[j] = np.median(texp[sample])
+    
+    full_stats = np.percentile(excess_zodi/texp, stat_levels)
+    
+    for j in range(len(stat_levels))[::-1]:
+        plt.plot(med_texp, stats[:,j], label='%d (%.3f)' %(stat_levels[j], full_stats[j]), marker='o')
+        
+    plt.xlim(100,2000)
+    plt.ylim(-0.1, 3)
+    plt.xlabel('Image exposure time (s)')
+    plt.ylabel('Excess background flux (e-/s)')
+    plt.legend(loc='best')
+    plt.title('F105W')
+    
+    plt.savefig('F105W_excess_stats.pdf')
+    
+def etc_spectra():
+    """
+    Make actual spectra for the ETC for the different He bg cases
+    """
+    import pysynphot as S
+    
+    fl0 = 1.e-17
+    fwhm = 2 # Angstroms
+    heline = S.GaussianSource(fl0, 1.083e4, fwhm, fluxunits='flam')
+
+    continuum = S.FlatSpectrum(60, fluxunits='STMag')
+    model_spec = continuum+heline
+    model_spec.convert('flam')
+    
+    bp = S.ObsBandpass('wfc3,ir,f105w')
+    
+    flux = {'50':0.1, '75':0.5, '95':1.5}
+    
+    obs = S.Observation(heline, bp)
+    for key in flux.keys():
+        fl = fl0*flux[key]/obs.countrate()
+        print fl
+    
+    fl = fl0*1.0/obs.countrate()
+    heline = S.GaussianSource(fl, 1.083e4, fwhm, fluxunits='flam')
+    obs = S.Observation(heline, bp)
+    
+    import astropy.io.fits as pyfits
+    
+    h = pyfits.Header()
+    h['CONTACT'] = ('G. Brammer', 'Person to contact in case of questions')
+    h['DESCRIPT'] = ('Airglow line at 10830 A')
+    h['MAPKEY'] = ('el10830a')
+    h['FILE_TYP'] = ('Airglow line at 10830 Angstroms')
+    h['SYSTEMS'] = ('PYETC')
+    h['PSYNEXPR'] = ('GaussianSource(%.3e,1.083e4,%.1f,fluxunits="flam")' %(fl, fwhm))
+    #h.add_history("This file is a spectrum produced by PySynphot to model the He I 10830 airglow line as a Gaussian with FWHM = 2A. The spectrum is normalized to produce a background countrate of 1 e/s/pix in the WFC3/IR F105W filter.")
+    
+    heline.writefits('el10830a_001.fits', clobber=True)
+    im = pyfits.open('el10830a_001.fits')
+    for card in h.cards:
+        im[0].header[card[0]] = (card[1], card[2])
+    #
+    im[0].header.add_history("This file is a spectrum produced by PySynphot to model the He I 10830 airglow line as a Gaussian with FWHM = 2A.  The spectrum is normalized to produce a background countrate of 1 e/s/pix in the WFC3/IR F105W filter.")
+    im[0].header.add_history("")
+    im[0].header.add_history("The 50, 75, and 95 percentile fluxes of the line background observed in archival F105W observations are 0.1, 0.5, and 1.5 e/s/pix.")
+    
+    
+    im.writeto('el10830a_001.fits', clobber=True)
+    
+    
+    
+    model_50 = model_spec.renorm(0.1, 'Counts', bp)
+    model_75 = model_spec.renorm(0.5, 'Counts', bp)
+    model_95 = model_spec.renorm(1.5, 'Counts', bp)
+    
+    #### Demo figure
+    plt.plot(model_50.wave-10830, model_50.flux/1.e-17, label='F105W 0.1 e/s, 50%')
+    plt.plot(model_75.wave-10830, model_75.flux/1.e-17, label='F105W 0.5 e/s, 75%')
+    plt.plot(model_95.wave-10830, model_95.flux/1.e-17, label='F105W 1.5 e/s, 95%')
+    plt.xlim(-20, 20)
+    plt.ylabel(r'$f_\lambda$ ($10^{-17}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\AA^{-1})$')
+    plt.xlabel(r'$\lambda - 10830\,\AA$')
+    plt.legend(loc='best', fontsize=12)
+    plt.savefig('He10830_ETC_spec.png')
+    
+    header = """# wavelength flux
+# Units: (angstroms)  (erg/s/cm2/A)
+# He I 10830 A background component: 50%, 0.1 e/s in F105W
+# Created: G. Brammer, 2014-09-18
+# (made with PySynphot)
+"""
+    fp = open('HeI_background_50.dat','w')
+    fp.write(header)
+    np.savetxt(fp, np.array([model_50.wave, model_50.flux]).T, fmt='%.6e')
+    fp.close()
+    
+    #
+    header = """# wavelength flux
+# Units: (angstroms)  (erg/s/cm2/A)
+# He I 10830 A background component: 75%, 0.5 e/s in F105W
+# Created: G. Brammer, 2014-09-18
+# (made with PySynphot)
+"""
+    fp = open('HeI_background_75.dat','w')
+    fp.write(header)
+    np.savetxt(fp, np.array([model_75.wave, model_75.flux]).T, fmt='%.6e')
+    fp.close()
+    
+    #
+    header = """# wavelength flux
+# Units: (angstroms)  (erg/s/cm2/A)
+# He I 10830 A background component: 95%, 1.5 e/s in F105W
+# Created: G. Brammer, 2014-09-18
+# (made with PySynphot)
+"""
+    fp = open('HeI_background_95.dat','w')
+    fp.write(header)
+    np.savetxt(fp, np.array([model_95.wave, model_95.flux]).T, fmt='%.6e')
+    fp.close()
+    
+    
+    ## Gives correct count rates in web ETC
+    # line_flux_50 = np.trapz(model_50.flux, model_50.wave)
+    # line_flux_75 = np.trapz(model_75.flux, model_75.wave)
+    # line_flux_95 = np.trapz(model_95.flux, model_95.wave)
+    
+    
+        
