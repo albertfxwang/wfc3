@@ -121,16 +121,21 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         # 1024x1024 index array of reads where pixels not saturated
         zi_flag = zi*1
         zi_flag[saturated] = 0
+        ### 2D array of the last un-saturated read
         last_ok_read = np.max(zi_flag, axis=0)
-
+        sat_zero = last_ok_read == 0        
+        pyfits.writeto(raw.replace('_raw','_lastread'), data=last_ok_read[5:-5,5:-5], header=flt[1].header, clobber=True)
+        ### keep pixels from first read even if saturated
+        last_ok_read[sat_zero] = 1
+        
         zi_idx = zi < 0
-        for i in range(2, NSAMP-1):
+        for i in range(1, NSAMP-1):
             zi_idx[i,:,:] = zi[i,:,:] == last_ok_read
 
         time_array = time[zi]
         time_array[0,:,:] = 1.e-3 # avoid divide-by-zero
         # pixels that saturated before the last read
-        fix = (last_ok_read < (ima[0].header['NSAMP'] - 1)) & (last_ok_read > 1)
+        fix = (last_ok_read < (ima[0].header['NSAMP'] - 1)) & (last_ok_read > 0)
         #err = np.sqrt(ima[0].header['READNSEA']**2 + cube)/time_array
         err = np.sqrt(readnoise_2D + cube)/time_array
 
@@ -139,6 +144,8 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
 
         fixed_sat = (zi_idx.sum(axis=0) > 0) & ((final_dq & 256) > 0)
         final_dq[fixed_sat] -= 256
+        final_dq[sat_zero] |= 256
+        
         print '  Nsat = %d' %(fixed_sat.sum())
         flt['DQ'].data |= final_dq[5:-5,5:-5] & 256
         
@@ -152,7 +159,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     
     #### Some earthshine flares DQ masked as 32: "unstable pixels"
     mask = (flt['DQ'].data & 32) > 0
-    if mask.sum() > 1.e4:
+    if mask.sum() > 2.e4:
         print '\n****\nTake out excessive DQ=32 flags (N=%e)\n****\n' %(mask.sum())
         flt['DQ'].data[mask] -= 32
         
