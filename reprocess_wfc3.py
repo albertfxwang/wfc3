@@ -208,11 +208,14 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
     ax = fig.add_subplot(4,4,16)
     ramp_cps = np.median(diff, axis=1)
     avg_ramp = np.median(ramp_cps, axis=1)
-    ax.plot(time[2:], ramp_cps[1:,16:-16:4]/100*gain, alpha=0.1, color='black')
-    ax.plot(time[2:], avg_ramp[1:]/100*gain, alpha=0.8, color='red', linewidth=2)
+    ax.plot(time[2:], (ramp_cps[1:,16:-16:4].T/np.diff(time)[1:]).T*gain, alpha=0.1, color='black')
+    ax.plot(time[2:], avg_ramp[1:]/np.diff(time)[1:]*gain, alpha=0.8, color='red', linewidth=2)
+    
+    root=raw.split('_')[0]
+    np.savetxt('%s_ramp.dat' %(root), np.array([time[2:], avg_ramp[1:]/np.diff(time)[1:]*gain]).T, fmt='%.3f')
     
     fig.tight_layout(h_pad=0.0, w_pad=0.0, pad=0.0)
-    plt.savefig(raw.split('_')[0]+'_ramp.png')
+    plt.savefig(root+'_ramp.png')
     
     return fig
     
