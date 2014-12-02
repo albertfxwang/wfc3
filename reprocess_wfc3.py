@@ -15,7 +15,7 @@ import os
 import glob
 import shutil
 
-def split_multiaccum(ima, scale_flat=True):
+def split_multiaccum(ima, scale_flat=True, get_err=False):
     """
     Pull out the MultiAccum reads of a RAW or IMA file into a single 3D 
     matrix.
@@ -27,7 +27,12 @@ def split_multiaccum(ima, scale_flat=True):
         FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
     else:
         FLAT_F140W = 1
-            
+    
+    
+    is_dark = 'drk' in ima.filename()
+    if is_dark:
+        FLAT_F140W = 1
+                
     NSAMP = ima[0].header['NSAMP']
     sh = ima['SCI',1].shape
     
@@ -36,20 +41,33 @@ def split_multiaccum(ima, scale_flat=True):
         dq = np.zeros((NSAMP, sh[0], sh[1]), dtype=np.int)
     else:
         dq = 0
+    
+    if get_err:
+        cube_err = cube*0
         
     time = np.zeros(NSAMP)
     for i in range(NSAMP):
-        if ima[0].header['UNITCORR'] == 'COMPLETE':
+        if (ima[0].header['UNITCORR'] == 'COMPLETE') & (~is_dark):
             cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
         else:
+            #print 'Dark'
             cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/FLAT_F140W
         
+        if get_err:
+            if ima[0].header['UNITCORR'] == 'COMPLETE':
+                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
+            else:
+                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data/FLAT_F140W
+            
         if 'ima' in ima.filename():
             dq[NSAMP-1-i, :, :] = ima['DQ',i+1].data
         
         time[NSAMP-1-i] = ima['TIME',i+1].header['PIXVALUE']
     
-    return cube, dq, time, NSAMP
+    if get_err:
+        return cube, cube_err, dq, time, NSAMP
+    else:
+        return cube, dq, time, NSAMP
         
 def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True):
     """
@@ -65,43 +83,74 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     """
     import wfc3tools
         
-    ### Remove existing products or calwf3 will die
+    #### Remove existing products or calwf3 will die
     for ext in ['flt','ima']:
         if os.path.exists(raw.replace('raw', ext)):
             os.remove(raw.replace('raw', ext))
     
-    ### Run calwf3
+    #### Run calwf3
     wfc3tools.calwf3.calwf3(raw)
     
     flt = pyfits.open(raw.replace('raw', 'flt'), mode='update')
     ima = pyfits.open(raw.replace('raw', 'ima'))
     
+    #### Pull out the data cube, order in the more natural sense
+    #### of first reads first
     cube, dq, time, NSAMP = split_multiaccum(ima, scale_flat=False)
     
+    #### Readnoise in 4 amps
     readnoise_2D = np.zeros((1024,1024))
     readnoise_2D[512: ,0:512] += ima[0].header['READNSEA']
     readnoise_2D[0:512,0:512] += ima[0].header['READNSEB']
     readnoise_2D[0:512, 512:] += ima[0].header['READNSEC']
     readnoise_2D[512: , 512:] += ima[0].header['READNSED']
     readnoise_2D = readnoise_2D**2
-        
+
+    #### Gain in 4 amps
+    gain_2D = np.zeros((1024,1024))
+    gain_2D[512: ,0:512] += ima[0].header['ATODGNA']
+    gain_2D[0:512,0:512] += ima[0].header['ATODGNB']
+    gain_2D[0:512, 512:] += ima[0].header['ATODGNC']
+    gain_2D[512: , 512:] += ima[0].header['ATODGND']
+    
+    ### Pop out reads affected by satellite trails or earthshine
     if len(pop_reads) > 0:
-        ### Pop out reads affected by satellite trails or earthshine
         print '\n****\nPop reads %s from %s\n****\n' %(pop_reads, ima.filename())
         
+        #### Need to put dark back in for Poisson
+        dark_file = ima[0].header['DARKFILE'].replace('iref$', os.getenv('iref')+'/')
+        dark = pyfits.open(dark_file)
+        dark_cube, dark_dq, dark_time, dark_NSAMP = split_multiaccum(dark, scale_flat=False)
+        
+        #### Need flat for Poisson
+        flat_file = ima[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
+        flat = pyfits.open(flat_file)#[1].data
+        ff = flat[1].data
+        
+        #### Subtract diffs if flagged reads
         diff = np.diff(cube, axis=0)
+        dark_diff = np.diff(dark_cube, axis=0)
+
         dt = np.diff(time)
         final_exptime = time[-1]
         final_sci = cube[-1,:,:]*1
+        final_dark = dark_cube[NSAMP-1,:,:]*1        
         for read in pop_reads:
             final_sci -= diff[read,:,:]
+            final_dark -= dark_diff[read,:,:]
             final_exptime -= dt[read]
+                
+        #### Variance terms
+        ## read noise
+        final_var = readnoise_2D*1
+        ## poisson term
+        final_var += (final_sci*ff + final_dark*gain_2D)*(gain_2D/2.368)
+        ## flat errors
+        final_var += (final_sci*ff*flat['ERR'].data)**2
+        final_err = np.sqrt(final_var)/ff/(gain_2D/2.368)/1.003448/final_exptime
         
-        #final_var = ima[0].header['READNSEA']**2 + final_sci        
-        final_var = readnoise_2D + final_sci        
-        final_err = np.sqrt(final_var)/final_exptime
         final_sci /= final_exptime
-        
+                
         flt[0].header['EXPTIME'] = final_exptime
         
     else:
@@ -156,7 +205,6 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     flt['SCI'].data = final_sci[5:-5,5:-5]
     flt['ERR'].data = final_err[5:-5,5:-5]
     
-    
     #### Some earthshine flares DQ masked as 32: "unstable pixels"
     mask = (flt['DQ'].data & 32) > 0
     if mask.sum() > 2.e4:
@@ -166,13 +214,9 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     ### Update the FLT header
     flt[0].header['IMA2FLT'] = (1, 'FLT extracted from IMA file')
     flt[0].header['IMASAT'] = (fix_saturated*1, 'Manually fixed saturation')
-
-    # if pyfits.__version__ > '3.2':
-    #     flt[0].header['IMA2FLT'] = (1, 'FLT extracted from IMA file')
-    #     flt[0].header['IMASAT'] = (fix_saturated*1, 'Manually fixed saturation')
-    # else:
-    #     flt[0].header.update('IMA2FLT', 1, comment='FLT extracted from IMA file')
-    #     flt[0].header.update('IMASAT', fix_saturated*1, comment='Manually fixed saturation')
+    flt[0].header['NPOP'] = (len(pop_reads), 'Number of reads popped from the sequence')
+    for iread, read in enumerate(pop_reads):
+        flt[0].header['POPREAD%d' %(iread+1)] = (read, 'Read kicked out of the MULTIACCUM sequence')
         
     flt.flush()
     
@@ -185,38 +229,126 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
     Make a figure (.ramp.png) showing the individual reads of an 
     IMA or RAW file.
     """    
+    import scipy.ndimage as nd
     img = pyfits.open(raw)
-    
+        
     if 'raw' in raw:
-        gain=2.5
+        gains = [2.3399999, 2.3699999, 2.3099999, 2.3800001]
+        gain = np.zeros((1024,1024))
+        gain[512: ,0:512] += gains[0]
+        gain[0:512,0:512] += gains[1]
+        gain[0:512, 512:] += gains[2]
+        gain[512: , 512:] += gains[3]
     else:
         gain=1
-        
-    cube, dq, time, NSAMP = split_multiaccum(img)
-    diff = np.diff(cube, axis=0)
-    dt = np.diff(time)
-    fig = plt.figure(figsize=[10,10])
     
-    #(xs=10, aspect=0.8, wspace=0., hspace=0., left=0.05, NO_GUI=True)
+    #### Split the multiaccum file into individual reads    
+    cube, dq, time, NSAMP = split_multiaccum(img, scale_flat=False)
+    
+    if 'raw' in raw:
+        dark_file = img[0].header['DARKFILE'].replace('iref$', os.getenv('iref')+'/')
+        dark = pyfits.open(dark_file)
+        dark_cube, dark_dq, dark_time, dark_NSAMP = split_multiaccum(dark, scale_flat=False)
+
+        diff = np.diff(cube-dark_cube[:NSAMP,:,:], axis=0)*gain
+        dt = np.diff(time)
+    
+        #### Need flat for Poisson
+        flat_file = img[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
+        flat = pyfits.open(flat_file)#[1].data
+        ff = flat[1].data
+        diff /= ff
+    else:
+        diff = np.diff(cube, axis=0)
+        dt = np.diff(time)
+    
+    #### Initialize the figure
+    plt.ioff()
+    fig = plt.figure(figsize=[10,10])
+
+    #### Smoothing
+    smooth = 1
+    kernel = np.ones((smooth,smooth))/smooth**2
+    
+    #### Plot the individual reads
     for j in range(1,NSAMP-1):
         ax = fig.add_subplot(4,4,j)
-        ax.imshow(diff[j,:,:]/dt[j]*gain, vmin=0, vmax=4, origin='lower', cmap=plt.get_cmap('hot'))
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
+        smooth_read = nd.convolve(diff[j,:,:],kernel)
+        ax.imshow(smooth_read[5:-5:smooth, 5:-5:smooth]/dt[j], 
+                  vmin=0, vmax=4, origin='lower', cmap=plt.get_cmap('hot'))
+        
+        ax.set_xticklabels([]); ax.set_yticklabels([])
         ax.text(20,5,'%d' %(j), ha='left', va='bottom', backgroundcolor='white')
-    #
-    ax = fig.add_subplot(4,4,16)
+    
+    #### Show the ramp
+    ax = fig.add_axes((0.6, 0.05, 0.37, 0.18))
     ramp_cps = np.median(diff, axis=1)
     avg_ramp = np.median(ramp_cps, axis=1)
-    ax.plot(time[2:], (ramp_cps[1:,16:-16:4].T/np.diff(time)[1:]).T*gain, alpha=0.1, color='black')
-    ax.plot(time[2:], avg_ramp[1:]/np.diff(time)[1:]*gain, alpha=0.8, color='red', linewidth=2)
     
+    ax.plot(time[2:], (ramp_cps[1:,16:-16:4].T/np.diff(time)[1:]).T, alpha=0.1, color='black')
+    ax.plot(time[2:], avg_ramp[1:]/np.diff(time)[1:], alpha=0.8, color='red', linewidth=2)
+    ax.set_xlabel('time'); ax.set_ylabel('background [e/s]')
+
+    fig.tight_layout(h_pad=0.3, w_pad=0.3, pad=0.5)
     root=raw.split('_')[0]
-    np.savetxt('%s_ramp.dat' %(root), np.array([time[2:], avg_ramp[1:]/np.diff(time)[1:]*gain]).T, fmt='%.3f')
-    
-    fig.tight_layout(h_pad=0.0, w_pad=0.0, pad=0.0)
     plt.savefig(root+'_ramp.png')
+    
+    #### Same ramp data file    
+    np.savetxt('%s_ramp.dat' %(root), np.array([time[2:], avg_ramp[1:]/np.diff(time)[1:]]).T, fmt='%.3f')
     
     return fig
     
+def ramp_crrej(raw):
+    """
+    testing xxx
     
+    Do own CR-rejection
+    """
+    import wfc3tools
+    
+    ### Run calwf3
+    if not os.path.exists(raw.replace('raw', 'ima')):
+        ### Remove existing products or calwf3 will die
+        if os.path.exists(raw.replace('raw', 'flt')):
+            os.remove(raw.replace('raw', 'flt'))
+        
+        wfc3tools.calwf3.calwf3(raw)
+        
+    ima = pyfits.open(raw.replace('raw', 'ima'))
+    
+    ### cube: cumulated reads
+    cube, cube_err, dq, time, NSAMP = split_multiaccum(ima, scale_flat=False, get_err=True)
+    ### diff: Delta reads
+    diff = np.diff(cube, axis=0)
+    dt = np.diff(time)
+    
+    ### units right? should be e-/s
+    err = np.sqrt((cube_err[1:,:,:].T/time[1:])**2 + (cube_err[:-1,:,:].T/time[:-1])**2).T
+    # ix = -8
+    # med = np.median((diff[ix,400:600,400:600]/dt[ix]))
+    # rnd = np.random.normal(size=(1024,1024))*err[ix,:,:]+med
+    
+    #### Compute average ramp
+    ## bit mask
+    mask = (dq[-1,:,:] & ~(576+8192+4096+32)) == 0
+    ## bright objects
+    mask &= np.abs((diff[-1,:,:]-np.median(diff[-1,:,:]))/dt[-1]) < 5*err[-1,:,:]
+    
+    #### countrate:  delta countrate, minus average ramp
+    countrate = diff*0.
+    ramp = dt*0.
+    for i in range(len(dt)):
+        ramp[i] = np.median(diff[i,:,:][mask])/dt[i]
+        countrate[i,:,:] = diff[i,:,:]/dt[i]-ramp[i]
+    
+    #### CR rejection:  (countrate_i - med)/err > threshold    
+    med = np.median(countrate, axis=0)
+    cr_full = ~np.isfinite(med)
+    sum = cr*0.
+    sum_time = sum*0.
+    for i in range(5,len(dt)):
+        cr = (countrate[i,:,:]-med)/err[i,:,:] < 15
+        cr_full |= cr
+        sum += countrate[i,:,:]*dt[i]*cr
+        sum_time += dt[i]*cr
+        
