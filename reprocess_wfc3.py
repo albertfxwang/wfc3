@@ -30,6 +30,15 @@ if len(logger.handlers) == 0:
 
 #logging.basicConfig(format='%(name)s, %(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
 
+def get_flat(hdulist):
+    """
+    Get the desired flat-field file
+    """
+    flat_file = hdulist[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
+    flat_im = pyfits.open(flat_file)
+    flat = flat_im[1].data
+    return flat_im, flat
+    
 def split_multiaccum(ima, scale_flat=True, get_err=False):
     """
     Pull out the MultiAccum reads of a RAW or IMA file into a single 3D 
@@ -39,14 +48,16 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     """    
     skip_ima = ('ima' in ima.filename()) & (ima[0].header['FLATCORR'] == 'COMPLETE')
     if scale_flat & ~skip_ima:
-        FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+        #FLAT_F140W = pyfits.open(os.path.join(os.getenv('iref'), 'uc721143i_pfl.fits'))[1].data
+        flat_im, flat = get_flat(ima)
     else:
-        FLAT_F140W = 1
+        #FLAT_F140W = 1
+        flat_im, flat = None, 1.
     
     
     is_dark = 'drk' in ima.filename()
     if is_dark:
-        FLAT_F140W = 1
+        flat = 1
                 
     NSAMP = ima[0].header['NSAMP']
     sh = ima['SCI',1].shape
@@ -63,16 +74,16 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     time = np.zeros(NSAMP)
     for i in range(NSAMP):
         if (ima[0].header['UNITCORR'] == 'COMPLETE') & (~is_dark):
-            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
+            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data*ima['TIME',i+1].header['PIXVALUE']/flat
         else:
             #print 'Dark'
-            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/FLAT_F140W
+            cube[NSAMP-1-i, :, :] = ima['SCI',i+1].data/flat
         
         if get_err:
             if ima[0].header['UNITCORR'] == 'COMPLETE':
-                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data*ima['TIME',i+1].header['PIXVALUE']/FLAT_F140W
+                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data*ima['TIME',i+1].header['PIXVALUE']/flat
             else:
-                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data/FLAT_F140W
+                cube_err[NSAMP-1-i, :, :] = ima['ERR',i+1].data/flat
             
         if 'ima' in ima.filename():
             dq[NSAMP-1-i, :, :] = ima['DQ',i+1].data
@@ -138,9 +149,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         dark_cube, dark_dq, dark_time, dark_NSAMP = split_multiaccum(dark, scale_flat=False)
         
         #### Need flat for Poisson
-        flat_file = ima[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
-        flat = pyfits.open(flat_file)#[1].data
-        ff = flat[1].data
+        flat_im, flat = get_flat(ima)
         
         #### Subtract diffs if flagged reads
         diff = np.diff(cube, axis=0)
@@ -159,10 +168,10 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         ## read noise
         final_var = readnoise_2D*1
         ## poisson term
-        final_var += (final_sci*ff + final_dark*gain_2D)*(gain_2D/2.368)
+        final_var += (final_sci*flat + final_dark*gain_2D)*(gain_2D/2.368)
         ## flat errors
-        final_var += (final_sci*ff*flat['ERR'].data)**2
-        final_err = np.sqrt(final_var)/ff/(gain_2D/2.368)/1.003448/final_exptime
+        final_var += (final_sci*flat*flat_im['ERR'].data)**2
+        final_err = np.sqrt(final_var)/flat/(gain_2D/2.368)/1.003448/final_exptime
         
         final_sci /= final_exptime
                 
@@ -277,10 +286,8 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         dt = np.diff(time)
     
         #### Need flat for Poisson
-        flat_file = img[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
-        flat = pyfits.open(flat_file)#[1].data
-        ff = flat[1].data
-        diff /= ff
+        flat_im, flat = get_flat(img)
+        diff /= flat
     else:
         diff = np.diff(cube, axis=0)
         dt = np.diff(time)
@@ -336,7 +343,7 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         for i in range(1, NSAMP):
             logger.info('Remove excess %.2f e/s from read #%d (t=%.1f)' %(flux[-i]-min, NSAMP-i+1, time[-i]))
             
-            imraw['SCI',i].data = imraw['SCI',i].data - np.cast[int](subval[-i]/2.36*ff)
+            imraw['SCI',i].data = imraw['SCI',i].data - np.cast[int](subval[-i]/2.36*flat)
                 
         files=glob.glob(raw.split('q_')[0]+'x_*')
         for file in files:
@@ -349,9 +356,6 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         wfc3tools.calwf3.calwf3(raw.replace('q_raw', 'x_raw'))
                 
     return fig
-    
-def clean_ramp(raw='ibp329isq_raw.fits'):
-    tr, fr = np.loadtxt(raw.replace('raw.fits','ramp.dat'), unpack=True)
     
 def ramp_crrej(raw):
     """
@@ -408,7 +412,9 @@ def ramp_crrej(raw):
         sum_time += dt[i]*cr
     
 def split_ima():
-    
+    """
+    Testing splitting IMA into individual flt files
+    """
     import scipy.ndimage as nd
     
     ima_file = 'ibp329isq_ima.fits'
