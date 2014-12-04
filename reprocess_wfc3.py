@@ -15,6 +15,21 @@ import os
 import glob
 import shutil
 
+import logging
+logger = logging.getLogger('reprocess_wfc3')
+logger.setLevel(logging.DEBUG)
+
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
+ch.setFormatter(formatter)
+if len(logger.handlers) == 0:
+    logger.addHandler(ch)
+
+#logger.info('test')
+
+#logging.basicConfig(format='%(name)s, %(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
+
 def split_multiaccum(ima, scale_flat=True, get_err=False):
     """
     Pull out the MultiAccum reads of a RAW or IMA file into a single 3D 
@@ -224,14 +239,20 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     if remove_ima:
         os.remove(raw.replace('raw', 'ima'))
 
-def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
+def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=True):
     """
     Make a figure (.ramp.png) showing the individual reads of an 
     IMA or RAW file.
     """    
     import scipy.ndimage as nd
-    img = pyfits.open(raw)
+    
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.WARN)
         
+    img = pyfits.open(raw)
+    
     if 'raw' in raw:
         gains = [2.3399999, 2.3699999, 2.3099999, 2.3800001]
         gain = np.zeros((1024,1024))
@@ -242,6 +263,8 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
     else:
         gain=1
     
+    logger.info('Make MULTIACCUM cube')
+        
     #### Split the multiaccum file into individual reads    
     cube, dq, time, NSAMP = split_multiaccum(img, scale_flat=False)
     
@@ -262,15 +285,21 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
         diff = np.diff(cube, axis=0)
         dt = np.diff(time)
     
+    ####  Average ramp
+    ramp_cps = np.median(diff, axis=1)
+    avg_ramp = np.median(ramp_cps, axis=1)
+    
     #### Initialize the figure
+    logger.info('Make plot')
+    
     plt.ioff()
     fig = plt.figure(figsize=[10,10])
 
-    #### Smoothing
+    ## Smoothing
     smooth = 1
     kernel = np.ones((smooth,smooth))/smooth**2
     
-    #### Plot the individual reads
+    ## Plot the individual reads
     for j in range(1,NSAMP-1):
         ax = fig.add_subplot(4,4,j)
         smooth_read = nd.convolve(diff[j,:,:],kernel)
@@ -280,11 +309,8 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
         ax.set_xticklabels([]); ax.set_yticklabels([])
         ax.text(20,5,'%d' %(j), ha='left', va='bottom', backgroundcolor='white')
     
-    #### Show the ramp
+    ## Show the ramp
     ax = fig.add_axes((0.6, 0.05, 0.37, 0.18))
-    ramp_cps = np.median(diff, axis=1)
-    avg_ramp = np.median(ramp_cps, axis=1)
-    
     ax.plot(time[2:], (ramp_cps[1:,16:-16:4].T/np.diff(time)[1:]).T, alpha=0.1, color='black')
     ax.plot(time[2:], avg_ramp[1:]/np.diff(time)[1:], alpha=0.8, color='red', linewidth=2)
     ax.set_xlabel('time'); ax.set_ylabel('background [e/s]')
@@ -294,9 +320,38 @@ def show_MultiAccum_reads(raw='ib3701s4q_ima.fits'):
     plt.savefig(root+'_ramp.png')
     
     #### Same ramp data file    
-    np.savetxt('%s_ramp.dat' %(root), np.array([time[2:], avg_ramp[1:]/np.diff(time)[1:]]).T, fmt='%.3f')
+    np.savetxt('%s_ramp.dat' %(root), np.array([time[1:], avg_ramp/np.diff(time)]).T, fmt='%.3f')
     
+    if flatten_ramp:
+        #### Flatten the ramp by setting background countrate to the average.  
+        #### Output saved to "*x_flt.fits" rather than the usual *q_flt.fits.
+        import wfc3tools
+        
+        flux = avg_ramp/np.diff(time)
+        avg = avg_ramp.sum()/time[-1]
+        min = flux[1:].min()
+        subval = np.cumsum((flux-avg)*np.diff(time))
+        
+        imraw = pyfits.open(raw.replace('ima','raw'))
+        for i in range(1, NSAMP):
+            logger.info('Remove excess %.2f e/s from read #%d (t=%.1f)' %(flux[-i]-min, NSAMP-i+1, time[-i]))
+            
+            imraw['SCI',i].data = imraw['SCI',i].data - np.cast[int](subval[-i]/2.36*ff)
+                
+        files=glob.glob(raw.split('q_')[0]+'x_*')
+        for file in files:
+            os.remove(file)
+            
+        imraw[0].header['CRCORR'] = 'PERFORM'
+        imraw.writeto(raw.replace('q_raw', 'x_raw'), clobber=True)
+        
+        ## Run calwf3
+        wfc3tools.calwf3.calwf3(raw.replace('q_raw', 'x_raw'))
+                
     return fig
+    
+def clean_ramp(raw='ibp329isq_raw.fits'):
+    tr, fr = np.loadtxt(raw.replace('raw.fits','ramp.dat'), unpack=True)
     
 def ramp_crrej(raw):
     """
@@ -351,4 +406,74 @@ def ramp_crrej(raw):
         cr_full |= cr
         sum += countrate[i,:,:]*dt[i]*cr
         sum_time += dt[i]*cr
+    
+def split_ima():
+    
+    import scipy.ndimage as nd
+    
+    ima_file = 'ibp329isq_ima.fits'
+    ima = pyfits.open(ima_file)   
+     
+    #### Split the multiaccum file into individual reads    
+    cube, cube_err, dq, time, NSAMP = mywfc3.reprocess_wfc3.split_multiaccum(ima, scale_flat=False, get_err=True)
+        
+    #
+    dark_file = ima[0].header['DARKFILE'].replace('iref$', os.getenv('iref')+'/')
+    dark = pyfits.open(dark_file)
+    dark_cube, dark_dq, dark_time, dark_NSAMP = mywfc3.reprocess_wfc3.split_multiaccum(dark, scale_flat=False)
+    
+    #
+    #### Readnoise in 4 amps
+    readnoise_2D = np.zeros((1024,1024))
+    readnoise_2D[512: ,0:512] += ima[0].header['READNSEA']
+    readnoise_2D[0:512,0:512] += ima[0].header['READNSEB']
+    readnoise_2D[0:512, 512:] += ima[0].header['READNSEC']
+    readnoise_2D[512: , 512:] += ima[0].header['READNSED']
+    readnoise_2D = readnoise_2D**2
+
+    #### Gain in 4 amps
+    gain_2D = np.zeros((1024,1024))
+    gain_2D[512: ,0:512] += ima[0].header['ATODGNA']
+    gain_2D[0:512,0:512] += ima[0].header['ATODGNB']
+    gain_2D[0:512, 512:] += ima[0].header['ATODGNC']
+    gain_2D[512: , 512:] += ima[0].header['ATODGND']
+    
+    #### Need flat for Poisson
+    flat_file = ima[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
+    flat = pyfits.open(flat_file)#[1].data
+    ff = flat[1].data
+    
+    #### Subtract diffs if flagged reads
+    diff = np.diff(cube, axis=0)
+    dark_diff = np.diff(dark_cube, axis=0)
+    
+    dt = np.diff(time)
+    
+    diff_var = diff*0.
+    diff_err = diff*0.
+    for i in range(diff.shape[0]):
+        diff_var[i,:,:] = readnoise_2D*1.
+        diff_var[i,:,:] += (diff[i,:,:]*ff + dark_diff[i,:,:]*gain_2D)*(gain_2D/2.368)
+        diff_var[i,:,:] += (diff[i,:,:]*ff*flat['ERR'].data)**2
+        diff_err[i,:,:] = np.sqrt(diff_var[i,:,:])/ff/(gain_2D/2.368)/1.003448
+    
+    flt = pyfits.open(ima_file.replace('ima','flt'))
+    
+    letters = 'abcdefghijklmnoprstuv'
+    for i in range(1, diff.shape[0]):
+        dq_i = dq[i+1]
+        crset = (dq_i & 8192) > 0
+        dq_i[crset] -= 8192
+        flt['SCI'].data = diff[i,5:-5,5:-5]/dt[i]
+        flt['ERR'].data = diff_err[i,5:-5,5:-5]/dt[i]
+        flt['DQ'].data = dq_i[5:-5,5:-5]
+        flt.writeto(flt.filename().replace('q_', letters[i-1]+'_'), clobber=True)
+        
+    import drizzlepac
+    read_files=glob.glob('*[a-p]_flt.fits')
+    drizzlepac.astrodrizzle.AstroDrizzle(read_files, output='test', clean=True, context=False, preserve=False, skysub=True, driz_separate=True, driz_sep_wcs=True, median=True, blot=True, driz_cr=True, driz_cr_corr=True, driz_combine=True, resetbits=0)
+    
+    drizzlepac.astrodrizzle.AstroDrizzle(flt.filename(), output='testx', clean=True, context=False, preserve=False, skysub=True, driz_separate=True, driz_sep_wcs=True, median=True, blot=True, driz_cr=True, driz_cr_corr=True, driz_combine=True, resetbits=0)
+    
+    
         
