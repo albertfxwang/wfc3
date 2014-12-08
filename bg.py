@@ -51,7 +51,6 @@ def go_check(im_ext='raw', force=False, asn_files=None):
     Generate plots in a particular directory
     """
     import glob
-    import mywfc3.bg
     
     if asn_files is None:
         asn_files = glob.glob('*jif.fits*')        
@@ -60,7 +59,7 @@ def go_check(im_ext='raw', force=False, asn_files=None):
         root = asn.split('_jif')[0]
         if (len(glob.glob('%s_*orbit.png' %(root))) == 0) | force:
             try:
-                mywfc3.bg.show_orbit_limbangle(asn = [root], im_ext=im_ext)
+                show_orbit_limbangle(asn = [root], im_ext=im_ext)
             except ValueError:
                 pass
                   
@@ -261,7 +260,7 @@ def compute_shadow(root='ib5x15vlq', save_fits=False):
             orbit.addColumn('in_shadow', in_shadow*1)
             orbit.write_text(orbit.filename)
             
-def show_orbit_limbangle(asn = ['ib3701050', 'ib3701060'], ymax=3.8, im_ext='raw', tstr=None):
+def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None):
     
     import scipy.ndimage as nd
     import mywfc3.utils
@@ -1832,7 +1831,8 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     # pickle.dump(hdec, fp)
     # fp.close()
     
-    fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
+    #fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
+    fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
     hjd = pickle.load(fp)
     hra = pickle.load(fp)
     hdec = pickle.load(fp)
@@ -2111,5 +2111,318 @@ def future_ephem():
     plt.close()
     t0 = times[i]
     
+def test_clean():
+    #
+    files = glob.glob('ibhj*flt.fits.gz')[0::8][0:38]
+    ### enter shadow phase
+    phase = np.array([1, 0.6, 0.65, 0.7-1, 0.8-1, 0.6-1, 0.6, 0.6, 0.5-1, 0.75-1, 0.5-1, 0.5-1, 0.7-1, 0.65-1, 0.65-1, 0.65-1, 0.5-1, 0.6, 0.55, 0.5, 0.65-1, 0.6-1, 0.1, 0.01, 0.95, 0.1, 0.75-1, 0.55-1, 0.5-1, 0.45-1, 0.55, 0.6, 0.45-1, 0.4, 0.6, 0.25, 0.2, 0.3 ])
     
+    ## AEGIS
+    files = glob.glob('ibhj*flt.fits.gz')[0::8][38:]
+    phase = np.array([0.8, 0.2-1, 0.5-1, 0.4, 0.4, -0.1, 0.8-1, 0.6-1, 0.55-1, 0.55-1, 0.2-1, 0.2-1, 0.6-1, 0.25-1, 0.55-1, 0.65-1, 0.65-1, 0.5-1, 0.65-1, 0.65-1, 0.7-1, 0.45, 0.5-1, 0.6-1, 0.65-1, 0.65-1, 0.35-1, 0.05, 0.7-1, 0.5-1,0.1-1 ])
+    
+    ## COSMOS
+    files = glob.glob('ibhm*flt.fits.gz')[0::8][28:]
+    phase = np.array([0.4-1, 0.56-1, 0.1-1, 0.65-1, 0.6-1, 0.65-1, 0.65-1, 0.65-1, 0.65-1, 0.05-1, 0.6-1, 0.6-1, 0.6-1, 0.6-1, 0.25, 0.3, 0.3, 0.1-1, 0.02-1, 0.3, 0.6-1, 0.1-1, 0.2-1, 0.25, 0.55, 0.3, 0.3, 0.3,  ])
+    
+    mjdi = phase*0.
+    for i, file in enumerate(files):
+        print file
+        im = pyfits.open(file)
+        mjdi[i] = im[0].header['EXPSTART']
+    
+    #
+    flt=files[0]
+    im = pyfits.open(flt)
+    mjd0 = mjdi.min()
+    ra = im[0].header['RA_TARG']
+    dec = im[0].header['DEC_TARG']
+    
+    mjds = np.arange(mjd0, mjd0+365, 10)
+    N = len(mjds)
+    targ, sun, off = [], [], []
+    
+    targ_lon, targ_lat = mywfc3.bg.get_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)   
+    
+    targ_eq = co.Galactic(targ_lon, targ_lat)
+         
+    for i, mjd in enumerate(mjds):
+        print i, mjd-mjd0
+        sun_lon, sun_lat = mywfc3.bg.get_sun_ecliptic(mjd=mjd)
+        sun.append([sun_lon, sun_lat])
+        
+    deltas = mjds*0.
+    diffs = mjds*0.
+    diffs2 = diffs*0.
+    for  i, mjd in enumerate(mjds):
+        sun_eq = co.Galactic(sun[i][0], sun[i][1])
+        sun_angle = targ_eq.separation(sun_eq)
+        ### angle of target from sun, along the ecliptic
+        targ_offset = co.Angle(30, unit=u.deg) + (targ_lon-sun[i][0])
+        diffs[i] = targ_offset.deg #.wrap_at(180*u.deg).deg
+        diffs2[i] = targ_offset.wrap_at(180*u.deg).deg
+        deltas[i] = sun_angle.deg
+    
+    diff_int = np.interp(mjdi, mjds, diffs)
+    diff2_int = np.interp(mjdi, mjds, diffs2)
+
+    # plt.plot(mjds, deltas, label='sun angle')
+    # plt.plot(mjds, diffs, label='delta EclLong')
+    # plt.scatter(mjdi, phase*100, label='shadow phase')
+    
+    plt.scatter(diff2_int, phase)
+    plt.plot([-180,180],[1,-1])
+    
+    test_phase = mjdi*0.
+    for i, file in enumerate(files):
+        result = mywfc3.bg.clean_shadow_phase(flt=file)
+        test_phase[i] = result[2]
+    
+    fig, ax = mywfc3.bg.show_object_phase(ra= 53.257475,dec= -27.689022,field="goodss", year=(2010,2.5))
+    tt = astropy.time.Time(mjdi, format='mjd')
+    ax.scatter(tt.plot_date, phase, color='orange', s=50, alpha=0.5, zorder=10)
+    fig.savefig('goodss_shadow_phase_data.pdf')
+    
+    fig, ax = mywfc3.bg.show_object_phase(ra= 214.8872004167, dec=52.863,field="aegis", year=(2010,2.5))
+    tt = astropy.time.Time(mjdi, format='mjd')
+    ax.scatter(tt.plot_date, phase, color='orange', s=50, alpha=0.5, zorder=10)
+    fig.savefig('aegis_shadow_phase_data.pdf')
+
+    fig, ax = mywfc3.bg.show_object_phase(ra= 150.0725, dec=2.4,field="cosmos", year=(2010,2.5))
+    tt = astropy.time.Time(mjdi, format='mjd')
+    ax.scatter(tt.plot_date, phase, color='orange', s=50, alpha=0.5, zorder=10)
+    fig.savefig('cosmos_shadow_phase_data.pdf')
+    
+def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149', save_fig=True):
+    import pickle
+    import astropy.coordinates as co
+    import astropy.units as u
+    from matplotlib.ticker import MultipleLocator
+    from matplotlib.dates import MonthLocator
+    
+    t0 = astropy.time.Time('%d-01-01' %(year[0]))
+    mjds = np.arange(t0.mjd, t0.mjd+365*year[1])
+    times = astropy.time.Time(mjds, format='mjd', scale='utc')
+    
+    print 'Get Sun ra/dec from %s' %(os.path.dirname(__file__)+'/data/sun_coords.pkl')
+    
+    fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
+    hjd = pickle.load(fp)
+    hra = pickle.load(fp)
+    hdec = pickle.load(fp)
+    fp.close()
+    
+    sun_lon = co.Longitude(np.interp(mjds, hjd-24.e5-0.5, hra)*u.deg)
+    targ_lon, targ_lat = get_ecliptic_coords(ra=ra, dec=dec, mjd=mjds[180])   
+    targ_eq = co.Galactic(targ_lon, targ_lat)
+    sun_eq = co.Galactic(sun_lon, targ_lat*0)
+    
+    sun_angle = targ_eq.separation(sun_eq)
+    
+    targ_offset = co.Angle(30, unit=u.deg)+ (targ_lon-sun_lon)
+    phase = -targ_offset.wrap_at(180*u.deg).deg/180.
+            
+    fig = plt.figure(figsize=(8,6))
+    ax = fig.add_subplot(111)
+    ax.plot_date(times.plot_date, phase, linestyle='-', marker='None', label='Shadow Phase', color='black', linewidth=5, zorder=2, alpha=0.5)
+    
+    ax.plot_date(times.plot_date, phase-1000, linestyle='-', marker='None', label='|phase| < 0.3', color='r', linewidth=2, zorder=1, alpha=0.8)
+    ax.plot_date(times.plot_date, phase-1000, linestyle='-', marker='None', label='|phase| > 0.7', color='g', linewidth=2, zorder=1, alpha=0.8)
+    ax.plot_date(times.plot_date, phase-1000, linestyle='-', marker='None', label='Sun Angle', color='blue', linewidth=2, zorder=1, alpha=0.5)
+    
+    ax.set_ylabel('Phase of usable orbit where *leave* shadow')
+    good_phase = np.abs(phase) > 0.7
+    ax.scatter(times.plot_date[good_phase], phase[good_phase], marker='o', s=20, color='g', linewidth=2, alpha=0.2, zorder=3)
+    bad_phase = np.abs(phase) < 0.3
+    ax.scatter(times.plot_date[bad_phase], phase[bad_phase], marker='o', s=20, color='r', linewidth=2, alpha=0.2, zorder=3)
+    
+    ax2 = ax.twinx()
+    ax2.plot(times.plot_date, sun_angle.deg, linestyle='-', marker='None', color='blue', linewidth=2, alpha=0.2, zorder=1)
+    ax2.plot(times.plot_date, np.maximum(sun_angle.deg, 50), linestyle='-', marker='None', color='blue', linewidth=2, alpha=0.5, zorder=1)
+    ax2.set_ylabel('Sun Angle')
+    ax2.plot(times.plot_date[-100*year[1]:], times.plot_date[-100*year[1]:]*0.+50, color='blue', linestyle='--', alpha=0.5, zorder=4)
+    dt = 12.5*year[1]
+    ax2.text(times.plot_date[-1]-dt, 48, 'Sun angle > 50', color='blue', zorder=1, fontsize=8, ha='right', va='top', alpha=0.8)
+    
+    avoid = sun_angle.deg < 50
+    #ax2.scatter(times.plot_date[avoid], sun_angle.deg[avoid], marker='o', s=20, color='w', linewidth=2, alpha=0.2, zorder=3)
+    ax.scatter(times.plot_date[avoid], phase[avoid], marker='.', s=8, color='w', linewidth=2, alpha=0.6, zorder=4)
+    
+    ax.fill_between([times.plot_date.min(), times.plot_date.max()], [0.25,0.25],[1.0,1.0], color='0.8', alpha=0.5, zorder=0)
+    ax.text(times.plot_date.min()+dt, 0.3, 'Put F105W at BEGINNING of the orbit', ha='left', va='bottom', color='0.6', zorder=0)
+    ax.text(times.plot_date.min()+dt, 0.0, '(Sunlight for most of the orbit)', ha='left', va='bottom', color='0.6', zorder=0)
+    
+    ax.fill_between([times.plot_date.min(), times.plot_date.max()], [-0.25,-0.25],[-1.0,-1.0], color='0.8', alpha=0.5, zorder=0)
+    ax.text(times.plot_date.min()+dt, -0.3, 'Put F105W at END of the orbit', ha='left', va='top', color='0.6', zorder=0)
+    
+    ax.set_ylim(-1.3, 1.3)
+    ax2.set_ylim(0,180)
+    ax.set_xlim([times.plot_date.min(), times.plot_date.max()])
+    ax.legend(loc='upper center', fontsize=10, ncol=4)
+    
+    ax.yaxis.set_minor_locator(MultipleLocator(0.1))
+    ax.grid(alpha=0.6)
+    
+    ax2.yaxis.set_minor_locator(MultipleLocator(10))
+    ax.xaxis.set_minor_locator(MonthLocator(interval=1))
+    
+    if field:
+        title_str = '%s: ra=%.4f, dec=%.4f' %(field, ra, dec)
+    else:
+        title_str = 'ra=%.4f, dec=%.4f' %(ra, dec)
+    
+    ax.set_title(title_str)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    
+    if save_fig:
+        fig.savefig('%s_shadow_phase.pdf' %(field))
+        print 'Created %s_shadow_phase.pdf.' %(field)
+    
+    return fig, ax
+        
+def clean_shadow_phase(ra=0, dec=0, mjd=0, flt=None, verbose=True):
+    """
+    Compute shadow phase with minimal dependencies
+    """
+    import astropy.coordinates as co
+    import astropy.units as u
+
+    sun_ref = -99
+    if flt is not None:
+        im = pyfits.open(flt)
+        mjd = im[0].header['EXPSTART']
+        ra = im[0].header['RA_TARG']
+        dec = im[0].header['DEC_TARG']
+        sun_ref = im[0].header['SUNANGLE']
+        
+    targ_lon, targ_lat = get_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
+    sun_lon, sun_lat = get_sun_ecliptic(mjd=mjd)
+    
+    targ_eq = co.Galactic(targ_lon, targ_lat)
+    sun_eq = co.Galactic(sun_lon, sun_lat)
+    
+    sun_angle = targ_eq.separation(sun_eq)
+    ### angle of target from sun, along the ecliptic
+    targ_offset = co.Angle(0, unit=u.deg)+ -(targ_lon-sun_lon)
+    targ_offset = co.Angle(30, unit=u.deg)+ (targ_lon-sun_lon)
+    #targ_offset = co.Angle(30, unit=u.deg) + (targ_lon-sun[i][0])
+    
+    if verbose:
+        print '\n\n'
+        print 'mjd=%f; ra=%f; dec=%f' %(mjd, ra, dec)
+        print 'Target: ', targ_eq
+        print 'Sun:    ', sun_eq
+        print sun_angle.deg, sun_ref, -targ_offset.wrap_at(180*u.deg).deg, -targ_offset.wrap_at(180*u.deg).deg/180.
+    
+    return targ_lon, sun_lon, -targ_offset.wrap_at(180*u.deg).deg/180.
+    
+def get_sun_ecliptic(mjd=0, flt=None, approximate=True):
+    """
+    Get Sun "ecliptic" coords
+    """
+    import pickle
+    import astropy.coordinates as co
+    import astropy.units as u
+    
+    if flt is not None:
+        im = pyfits.open(flt)
+        mjd = im[0].header['EXPSTART']
+    
+    fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
+    hjd = pickle.load(fp)
+    hra = pickle.load(fp)
+    hdec = pickle.load(fp)
+    fp.close()
+    
+    ra = np.interp(mjd, hjd-24.e5-0.5, hra)
+    dec = np.interp(mjd, hjd-24.e5-0.5, hdec)
+    
+    ### approximation:  Solar EclipticLongitude = R.A., Latitude=0.
+    if approximate:
+        return co.Longitude(ra, unit=u.deg), co.Latitude(0, unit=u.deg)
+        
+    sun_lon, sun_lat = get_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
+    #sun_lon = co.Longitude(sun_lon + co.Angle(180, unit=u.deg))
+    
+    return sun_lon, sun_lat
+    
+def get_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
+    import astropy.time
+    import astropy.coordinates as co
+    import astropy.units as u
+    
+    if flt is not None:
+        im = pyfits.open(flt)
+        mjd = im[0].header['EXPSTART']
+        ra = im[0].header['RA_TARG']
+        dec = im[0].header['DEC_TARG']
+        im.close()
+    
+    try:
+        import ephem
+        ecl_lon, ecl_lat = get_ephem_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
+    except:
+        print 'No -ephem- module found, get from NED HTML.'
+        ecl_lon, ecl_lat = get_ned_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
+        
+    return ecl_lon, ecl_lat
+    
+def get_ephem_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
+    import astropy.time
+    import astropy.coordinates as co
+    import astropy.units as u
+    import ephem
+    
+    if flt is not None:
+        im = pyfits.open(flt)
+        mjd = im[0].header['EXPSTART']
+        ra = im[0].header['RA_TARG']
+        dec = im[0].header['DEC_TARG']
+    
+    t0 = astropy.time.Time(mjd, format='mjd')
+    spl = np.cast[float](t0.yday.split(':'))
+    yday_epoch = spl[0]+spl[1]/365.
+
+    eq = co.ICRS(ra=ra*u.deg, dec=dec*u.deg) #, unit=(u.deg, u.deg))
+    equat = ephem.Equatorial(str(eq.ra.to_string(sep=':', unit=u.hour)), str(eq.dec.to_string(sep=':', unit=u.deg)), epoch=yday_epoch)
+    
+    eclip_obs = ephem.Ecliptic(equat, epoch=yday_epoch)
+    ecl_lon = co.Longitude(eclip_obs.lon/np.pi*180, unit=u.deg)
+    ecl_lat = co.Latitude(eclip_obs.lat/np.pi*180, unit=u.deg)
+    return ecl_lon, ecl_lat
+        
+def get_ned_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
+    """
+    Use the NED web tool to convert Equatorial to Ecliptic coords
+     http://ned.ipac.caltech.edu/cgi-bin/calc?in_csys=Equatorial&in_equinox=J2000.0&obs_epoch=1950.0&lon=10&lat=45&pa=55&out_csys=Ecliptic&out_equinox=J2000.0
+    
+    """
+    import os
+    import astropy.time 
+    import astropy.io.fits as pyfits
+    import astropy.coordinates as co
+    import astropy.units as u
+    
+    if flt is not None:
+        im = pyfits.open(flt)
+        mjd = im[0].header['EXPSTART']
+        ra = im[0].header['RA_TARG']
+        dec = im[0].header['DEC_TARG']
+        
+    t0 = astropy.time.Time(mjd, format='mjd')
+    spl = np.cast[float](t0.yday.split(':'))
+    yday_epoch = spl[0]+spl[1]/365.
+    
+    print 'Get ecliptic coords: ra=%f; dec=%f; mjd=%f' %(ra, dec, mjd)
+    
+    os.system('wget --no-verbose -O /tmp/ned_Ecl.dat "http://ned.ipac.caltech.edu/cgi-bin/calc?in_csys=Equatorial&in_equinox=J2000.0&obs_epoch=%f&lon=%fd+&lat=%fd&pa=0&out_csys=Ecliptic&out_equinox=J2000.0"' %(yday_epoch, ra, dec))
+    
+    lines = open('/tmp/ned_Ecl.dat').readlines()
+    i=0
+    while 'Ecliptic' not in lines[i]:
+        i+=1
+    
+    ecl_lon, ecl_lat, dummy_pa = np.cast[float](lines[i+2].split())
+    return co.Longitude(ecl_lon, unit=u.deg), co.Latitude(ecl_lat, unit=u.deg)
     
