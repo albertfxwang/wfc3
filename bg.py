@@ -265,7 +265,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
     import scipy.ndimage as nd
     import mywfc3.utils
     import mywfc3.zodi
-    import mywfc3.etc_zodi
+    #import mywfc3.etc_zodi
     
     # os.chdir('/Users/brammer/WFC3/Jitter')
     
@@ -319,6 +319,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
             targname = spt['TARGNAME']
             ax3.text(0.5, 0.95, targname, ha='center', va='top', transform=ax3.transAxes)
             try:
+                import mywfc3.etc_zodi
                 zodi_obj = mywfc3.etc_zodi.ZodiacalLight(mywfc3.utils.gzfile(expname+'_raw.fits'))
                 zodi_obj.eval_filter(verbose=True)
                 zodi = zodi_obj.countrate
