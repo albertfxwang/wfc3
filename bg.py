@@ -2029,8 +2029,10 @@ def future_ephem():
     os.system('cat ephem_jun17_13498.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jun17_13498.reform')
 
     os.system('cat ephem_upcoming_13504_aug14.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_13504_aug14.reform')
+
+    os.system('cat ephem_dec11_13498.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_dec11_13498.reform')
     
-    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_13504_aug14.reform', unpack=True, dtype=np.str)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_dec11_13498.reform', unpack=True, dtype=np.str)
     
     #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
     
@@ -2084,6 +2086,9 @@ def future_ephem():
         #
         last[event[i]] = interval
         if 'TGT' in event[i]:
+            if 'SHADOW_ENTRY' not in last.keys():
+                last['SHADOW_ENTRY'] = t.Time([times[i], times[i]+dt])
+            #
             orbit_shadow.append((last['SHADOW_ENTRY'][1] - last['TGT_AVD_EXIT'][0]))
         #
         if (times[i]-t0) > 1*u.day:
@@ -2092,6 +2097,7 @@ def future_ephem():
                     exp_int = t.Time([flt_start[j], flt_end[j]])
                     plt.fill_between(exp_int.plot_date, -0.2*np.ones(2), 1.8*np.ones(2), color='red', alpha=0.5)
                     plt.gca().text(exp_int[1].plot_date, -0.3, flt_files[j].split('_flt')[0], rotation=90, size=8, ha='right', va='top')
+            #break
             #
             plt.gcf().autofmt_xdate()
             plt.ylim(-1,3)
@@ -2102,6 +2108,7 @@ def future_ephem():
             print t0.iso
             plt.close()
             t0 = times[i]
+            #break
     #
     plt.gcf().autofmt_xdate()
     plt.ylim(-1,3)
@@ -2111,6 +2118,58 @@ def future_ephem():
     plt.savefig('ephem_%s.png' %(t0.iso))
     plt.close()
     t0 = times[i]
+    
+    ### test phasing
+    
+    field='MACS0717'
+    fig, ax = mywfc3.bg.show_object_phase(ra=109.3860, dec=37.7499, field=field)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_dec11_13498.reform', unpack=True, dtype=np.str)
+    
+    field='MACS0416'
+    fig, ax = mywfc3.bg.show_object_phase(ra=64.0349, dec=-24.0724, field=field)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_m0416.reform', unpack=True, dtype=np.str)
+    
+    field='MACS1149'
+    fig, ax = mywfc3.bg.show_object_phase(ra=177.3987, dec=22.3985, field=field)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_13504_aug14.reform', unpack=True, dtype=np.str)
+
+    event = ['%s_%s' %(item, comment) for item, comment in zip(e_item, e_comment)]
+    ttag = []
+    for tt in e_ttag:
+        ttag.append('2014:'+tt)
+    
+    times = t.Time(ttag, scale='utc', format='yday')
+    
+    t0 = None
+    t1 = None
+    mjds = []
+    phases = []
+    last = None
+    i=0
+    for i in range(i,len(times)): #[:500]:
+        print threedhst.noNewLine + '%d %d' %(i, len(times))
+        if event[i] == 'TGT_AVD_EXIT':
+            t0 = times[i]
+        #
+        if event[i] == 'TGT_AVD_ENTRY':
+            t1 = times[i]
+        #
+        if event[i] == 'SHADOW_EXIT':
+            last = times[i]
+        
+        if (t1 is not None) & (t0 is not None) & (last is not None):
+            mjds.append(t0.mjd)
+            phase = ((last-t0)/(t1-t0)).value
+            if phase > 1:
+                phase = phase-2
+                
+            phases.append(phase)
+            #break
+            t1, t0, last = None, None, None
+    
+    tx = t.Time(mjds, format='mjd')
+    ax.scatter(tx.plot_date, phases, color='orange', alpha=0.2)
+    fig.savefig('%s_shadow_phase.pdf' %(field))
     
 def test_clean():
     #
@@ -2226,6 +2285,7 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     fig = plt.figure(figsize=(8,6))
     ax = fig.add_subplot(111)
     ax.plot_date(times.plot_date, phase, linestyle='-', marker='None', label='Shadow Phase', color='black', linewidth=5, zorder=2, alpha=0.5)
+    ax.plot_date(times.plot_date, phase*0, linestyle='-', marker='None', color='black', linewidth=1, zorder=1, alpha=0.5)
     
     ax.plot_date(times.plot_date, phase-1000, linestyle='-', marker='None', label='|phase| < 0.3', color='r', linewidth=2, zorder=1, alpha=0.8)
     ax.plot_date(times.plot_date, phase-1000, linestyle='-', marker='None', label='|phase| > 0.7', color='g', linewidth=2, zorder=1, alpha=0.8)

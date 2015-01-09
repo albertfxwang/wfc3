@@ -32,7 +32,7 @@ if len(logger.handlers) == 0:
 
 def get_flat(hdulist):
     """
-    Get the desired flat-field file
+    Get the flat-field file specified in the header
     """
     flat_file = hdulist[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
     flat_im = pyfits.open(flat_file)
@@ -53,7 +53,6 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     else:
         #FLAT_F140W = 1
         flat_im, flat = None, 1.
-    
     
     is_dark = 'drk' in ima.filename()
     if is_dark:
@@ -140,7 +139,8 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     gain_2D[512: , 512:] += ima[0].header['ATODGND']
     
     ### Pop out reads affected by satellite trails or earthshine
-    if len(pop_reads) > 0:
+    masks = glob.glob(raw.replace('.fits', '*mask.reg'))
+    if (len(pop_reads) > 0) | (len(masks) > 0):
         print '\n****\nPop reads %s from %s\n****\n' %(pop_reads, ima.filename())
         
         #### Need to put dark back in for Poisson
@@ -156,13 +156,30 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         dark_diff = np.diff(dark_cube, axis=0)
 
         dt = np.diff(time)
-        final_exptime = time[-1]
+        final_exptime = np.ones((1024, 1024))*time[-1]
         final_sci = cube[-1,:,:]*1
         final_dark = dark_cube[NSAMP-1,:,:]*1        
         for read in pop_reads:
             final_sci -= diff[read,:,:]
             final_dark -= dark_diff[read,:,:]
             final_exptime -= dt[read]
+        
+        #### Removed masked regions of individual reads
+        if len(masks) > 0:
+            import pyregion
+            for mask in masks:
+                mask_read = int(mask.split('.')[-3])
+                if mask_read in pop_reads:
+                    continue
+                
+                print 'Mask pixels in read %d (%s)' %(mask_read, mask)
+                
+                refhdu = ima['SCI', 1]
+                r = pyregion.open(mask).as_imagecoord(header=refhdu.header)
+                mask_array = r.get_mask(hdu=refhdu)
+                final_exptime -= mask_array*dt[mask_read]
+                final_sci -= diff[mask_read,:,:]*mask_array
+                final_dark -= dark_diff[mask_read,:,:]*mask_array
                 
         #### Variance terms
         ## read noise
@@ -175,7 +192,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         
         final_sci /= final_exptime
                 
-        flt[0].header['EXPTIME'] = final_exptime
+        flt[0].header['EXPTIME'] = np.max(final_exptime)
         
     else:
         final_sci = ima['SCI', 1].data*1
@@ -471,6 +488,7 @@ def split_ima():
         crset = (dq_i & 8192) > 0
         dq_i[crset] -= 8192
         flt['SCI'].data = diff[i,5:-5,5:-5]/dt[i]
+        flt['SCI'].data += 1-np.median(flt['SCI'].data)
         flt['ERR'].data = diff_err[i,5:-5,5:-5]/dt[i]
         flt['DQ'].data = dq_i[5:-5,5:-5]
         flt.writeto(flt.filename().replace('q_', letters[i-1]+'_'), clobber=True)
