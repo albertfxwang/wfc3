@@ -94,7 +94,7 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     else:
         return cube, dq, time, NSAMP
         
-def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True):
+def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True):
     """
     Run calwf3, if necessary, to generate ima & flt files.  Then put the last
     read of the ima in the FLT SCI extension and let Multidrizzle flag 
@@ -112,6 +112,11 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     for ext in ['flt','ima']:
         if os.path.exists(raw.replace('raw', ext)):
             os.remove(raw.replace('raw', ext))
+    
+    #### Turn off CR rejection    
+    raw_im = pyfits.open(raw, mode='update')
+    raw_im[0].header['CRCORR'] = 'OMIT'
+    raw_im.flush()
     
     #### Run calwf3
     wfc3tools.calwf3.calwf3(raw)
@@ -195,8 +200,56 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         flt[0].header['EXPTIME'] = np.max(final_exptime)
         
     else:
-        final_sci = ima['SCI', 1].data*1
-        final_err = ima['ERR', 1].data*1
+        if flatten_ramp:
+            #### Subtract out the median of each read to make background flat
+            fix_saturated = False
+            
+            print '\n*** Flatten ramp ***'
+            ima = pyfits.open(raw.replace('raw', 'ima'), mode='update')
+                        
+            total_countrate = np.median(ima['SCI',1].data)
+            for i in range(ima[0].header['NSAMP']-2):
+                med = np.median(ima['SCI',i+1].data)
+                print 'Read #%d, background:%.2f' %(i+1, med)
+                ima['SCI',i+1].data += total_countrate - med
+            
+            ima[0].header['CRCORR'] = 'PERFORM'
+            ima[0].header['DRIZCORR'] = 'OMIT'
+            
+            ima.flush()
+            
+            #### Initial cleanup
+            files=glob.glob(raw.replace('raw', 'ima_*'))
+            for file in files:
+                print '#cleanup: rm %s' %(file)
+                os.remove(file)
+        
+            #### Run calwf3 on cleaned IMA
+            wfc3tools.calwf3.calwf3(raw.replace('raw', 'ima'))
+            
+            ima = pyfits.open(raw.replace('raw', 'ima_ima'))
+            flt_new = pyfits.open(raw.replace('raw', 'ima_flt'))
+            flt['DQ'].data = flt_new['DQ'].data*1
+            flt['TIME'] = flt_new['TIME']
+            flt['SAMP'] = flt_new['SAMP']
+            
+            final_sci = ima['SCI', 1].data*1
+            final_sci[5:-5,5:-5] = flt_new['SCI'].data*1
+            #final_err = ima['ERR', 1].data*1
+            
+            ### Need original ERR, something gets messed up
+            final_err = ima['ERR', 1].data*1
+            final_err[5:-5,5:-5] = flt['ERR'].data*1
+            
+            ### Clean up
+            files=glob.glob(raw.replace('raw', 'ima_*'))
+            for file in files:
+                print '#cleanup: rm %s' %(file)
+                os.remove(file)
+                
+        else:
+            final_sci = ima['SCI', 1].data*1
+            final_err = ima['ERR', 1].data*1
     
     final_dq = ima['DQ', 1].data*1
     
@@ -248,9 +301,12 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     
     #### Some earthshine flares DQ masked as 32: "unstable pixels"
     mask = (flt['DQ'].data & 32) > 0
-    if mask.sum() > 2.e4:
+    if mask.sum() > 1.e4:
         print '\n****\nTake out excessive DQ=32 flags (N=%e)\n****\n' %(mask.sum())
-        flt['DQ'].data[mask] -= 32
+        #flt['DQ'].data[mask] -= 32
+        mask = flt['DQ'].data & 32
+        ### Leave flagged 32 pixels around the edges
+        flt['DQ'].data[5:-5,5:-5] -= mask[5:-5,5:-5]
         
     ### Update the FLT header
     flt[0].header['IMA2FLT'] = (1, 'FLT extracted from IMA file')

@@ -2031,8 +2031,14 @@ def future_ephem():
     os.system('cat ephem_upcoming_13504_aug14.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_upcoming_13504_aug14.reform')
 
     os.system('cat ephem_dec11_13498.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_dec11_13498.reform')
+
+    os.system('cat ephem_jan13_13779.dat | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > ephem_jan13_13779.reform')
     
-    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_dec11_13498.reform', unpack=True, dtype=np.str)
+    os.system('cat 13779v1A.cal | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > 13779v1A.cal.reform')
+    
+    os.system('cat 13779v3A.cal | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > 13779v3A.cal.reform')
+    
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v3A.cal.reform', unpack=True, dtype=np.str)
     
     #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
     
@@ -2067,7 +2073,7 @@ def future_ephem():
     last = {}
     orbit_shadow = []
     t0 = times[0]
-    for i in range(len(times)): #[:500]:
+    for i in range(len(times)):
         if event[i] in skip:
             continue
         #
@@ -2120,7 +2126,7 @@ def future_ephem():
     t0 = times[i]
     
     ### test phasing
-    
+        
     field='MACS0717'
     fig, ax = mywfc3.bg.show_object_phase(ra=109.3860, dec=37.7499, field=field)
     e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_dec11_13498.reform', unpack=True, dtype=np.str)
@@ -2133,6 +2139,15 @@ def future_ephem():
     fig, ax = mywfc3.bg.show_object_phase(ra=177.3987, dec=22.3985, field=field)
     e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_13504_aug14.reform', unpack=True, dtype=np.str)
 
+    field='GOODSS'
+    fig, ax = mywfc3.bg.show_object_phase(ra=53.15195, dec=-27.817578, field=field)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v1A.cal.reform', unpack=True, dtype=np.str)
+    
+    field='GOODSN'
+    fig, ax = mywfc3.bg.show_object_phase(ra=189.28548, dec=62.232069, field=field)
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v3A.cal.reform', unpack=True, dtype=np.str)
+    
+    ####
     event = ['%s_%s' %(item, comment) for item, comment in zip(e_item, e_comment)]
     ttag = []
     for tt in e_ttag:
@@ -2140,16 +2155,19 @@ def future_ephem():
     
     times = t.Time(ttag, scale='utc', format='yday')
     
+    t0next = None
     t0 = None
     t1 = None
     mjds = []
     phases = []
     last = None
     i=0
-    for i in range(i,len(times)): #[:500]:
-        print threedhst.noNewLine + '%d %d' %(i, len(times))
+    for i in range(i,len(times)): #[20000:25000]:
         if event[i] == 'TGT_AVD_EXIT':
-            t0 = times[i]
+            if t0next is not None:
+                t0 = t0next
+            
+            t0next = times[i]
         #
         if event[i] == 'TGT_AVD_ENTRY':
             t1 = times[i]
@@ -2157,15 +2175,21 @@ def future_ephem():
         if event[i] == 'SHADOW_EXIT':
             last = times[i]
         
-        if (t1 is not None) & (t0 is not None) & (last is not None):
-            mjds.append(t0.mjd)
-            phase = ((last-t0)/(t1-t0)).value
-            if phase > 1:
-                phase = phase-2
+        if (t0next is not None) & (t0 is not None):
+            if last is None:
+                t0, t1, t0start = None, None, None
+            else:
+                mjds.append(t0.mjd)
+                phase = ((last-t0)/(t1-t0)).value
+                phase = ((last-t0)/(t0next-t0)).value*2
+                if phase > 1:
+                    phase = phase-2
                 
-            phases.append(phase)
-            #break
-            t1, t0, last = None, None, None
+                
+                phases.append(phase)
+                print threedhst.noNewLine + '%d %d %.2f' %(i, len(times), phase)
+                #break
+                t1, t0, last = None, None, None
     
     tx = t.Time(mjds, format='mjd')
     ax.scatter(tx.plot_date, phases, color='orange', alpha=0.2)

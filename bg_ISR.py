@@ -570,7 +570,11 @@ def etc_spectra():
         fl = fl0*flux[key]/obs.countrate()
         print fl
     
-    fl = fl0*1.0/obs.countrate()
+    fl = fl0*1.0/obs.countrate() 
+    
+    #### Normalize to "per arcsec"
+    fl /= 0.1211*0.1355
+    
     heline = S.GaussianSource(fl, 1.083e4, fwhm, fluxunits='flam')
     obs = S.Observation(heline, bp)
     
@@ -585,17 +589,18 @@ def etc_spectra():
     h['PSYNEXPR'] = ('GaussianSource(%.3e,1.083e4,%.1f,fluxunits="flam")' %(fl, fwhm))
     #h.add_history("This file is a spectrum produced by PySynphot to model the He I 10830 airglow line as a Gaussian with FWHM = 2A. The spectrum is normalized to produce a background countrate of 1 e/s/pix in the WFC3/IR F105W filter.")
     
-    heline.writefits('el10830a_001.fits', clobber=True)
-    im = pyfits.open('el10830a_001.fits')
+    heline.writefits('el10830a_002.fits', clobber=True)
+    im = pyfits.open('el10830a_002.fits')
     for card in h.cards:
         im[0].header[card[0]] = (card[1], card[2])
     #
-    im[0].header.add_history("This file is a spectrum produced by PySynphot to model the He I 10830 airglow line as a Gaussian with FWHM = 2A.  The spectrum is normalized to produce a background countrate of 1 e/s/pix in the WFC3/IR F105W filter.")
+    im[0].header.add_history("This file is a spectrum produced by PySynphot to model the He I 10830 airglow line as a Gaussian with FWHM = 2A.  The spectrum is normalized to produce a background countrate of 1 e-/s/pix in the WFC3/IR F105W filter.")
     im[0].header.add_history("")
     im[0].header.add_history("The 50, 75, and 95 percentile fluxes of the line background observed in archival F105W observations are 0.1, 0.5, and 1.5 e/s/pix.")
+    im[0].header.add_history("")
+    im[0].header.add_history("For more information on the He 10830 component to the IR background, see WFC3/ISR 2014-03: Time-varying Excess Earth-glow Backgrounds in the WFC3/IR Channel (Brammer et al.).")
     
-    
-    im.writeto('el10830a_001.fits', clobber=True)
+    im.writeto('el10830a_002.fits', clobber=True)
     
     
     

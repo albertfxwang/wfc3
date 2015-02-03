@@ -907,22 +907,55 @@ def example_exposure(root='ibhj07ynq'):
     
     med = np.median((ima/flat_f140)[mask == 0])
     
-    fig = unicorn.plotting.plot_init(aspect=1/3., xs=7, fontsize=11, left=0.01, bottom=0.01, use_tex=True, NO_GUI=True, right=0.01, top=0.01, wspace=0.02, hspace=0.02)
+    show_all=False
     
+    if show_all:
+        subplot = 140
+        fig = unicorn.plotting.plot_init(aspect=1./4., xs=7, fontsize=11, left=0.01, bottom=0.01, use_tex=True, NO_GUI=True, right=0.01, top=0.01, wspace=0.02, hspace=0.02)
+    else:
+        subplot = 130
+        fig = unicorn.plotting.plot_init(aspect=1/3., xs=7, fontsize=11, left=0.01, bottom=0.01, use_tex=True, NO_GUI=True, right=0.01, top=0.01, wspace=0.02, hspace=0.02)
+        
     v = [0.85, 1.1]
     
-    ax = fig.add_subplot(131)
+    ax = fig.add_subplot(subplot+1)
     ax.imshow(ima/med, vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
     ax.text(0.02, 0.98, 'a) ' + root + ' (G141)', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
     
-    ax = fig.add_subplot(132)
+    ax = fig.add_subplot(subplot+2)
     ax.imshow(ima/med/flat_f140, vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
     ax.text(0.02, 0.98, 'b) Divide by F140W flat', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
 
-    ax = fig.add_subplot(133)
-    ax.imshow(ima/med/flat_f140*(mask == 0), vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
-    ax.text(0.02, 0.98, 'c) Object mask', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
+    if not show_all:
+        ax = fig.add_subplot(subplot+3)
+        ax.imshow(ima/med/flat_f140*(mask == 0), vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
+        ax.text(0.02, 0.98, 'c) Object mask', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
     
+    if show_all:
+        flt = pyfits.open('/Users/brammer/3DHST/Spectra/Work/3DHST_VariableBackgrounds/RedoPrep/ibhj07ynq_flt.fits')
+        data = flt[1].data*flat_f140
+        dq = flt['DQ'].data*1
+        for bit in [512, 64]:
+            dq[(dq & bit) > 0] -= bit
+            
+        data[dq > 0] = 0.
+    
+        skies = ['zodi_G141_clean.fits', 'excess_lo_G141_clean.fits']
+        sky = np.zeros((1014,1014))
+        norm = 0
+        for i in range(2):
+            s = pyfits.open('/Users/brammer/3DHST/Spectra/Work/CONF/%s' %(skies[i]))
+            sky += s[0].data*flt[0].header['GSKY%02d' %(i)]
+            norm += flt[0].header['GSKY%02d' %(i)]
+        #
+        ax = fig.add_subplot(subplot+4)
+        ax.imshow((data+norm)/med, vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
+        ax.text(0.02, 0.98, 'd) Background-subtracted', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
+        
+        ax = fig.add_subplot(subplot+3)
+        ax.imshow(sky/med, vmin=v[0], vmax=v[1], aspect='auto', interpolation='nearest')
+        ax.text(0.02, 0.98, 'c) Best-fit sky', ha='left', va='top', bbox=dict(facecolor='white', edgecolor='black', pad=6), fontsize=10,  transform=ax.transAxes)
+        
     for ax in fig.axes:
         ax.set_xticklabels([])
         ax.set_yticklabels([])
