@@ -240,10 +240,6 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
                 
                 exp = ima.filename().split('_ima')[0]
                 params = stsci.tools.asnutil.ASNMember()
-                asn_dict = {'members': {exp:params},
-                            'order': [exp],
-                            'output': exp}
-                                
                 asn = stsci.tools.asnutil.ASNTable(output=exp)
                 asn['members'] = {exp:params}
                 asn['order'] = [exp]
