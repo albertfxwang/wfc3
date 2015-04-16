@@ -115,8 +115,10 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     
     #### Turn off CR rejection    
     raw_im = pyfits.open(raw, mode='update')
-    raw_im[0].header['CRCORR'] = 'OMIT'
-    raw_im.flush()
+    
+    if not pop_reads:
+        raw_im[0].header['CRCORR'] = 'OMIT'
+        raw_im.flush()
     
     #### Run calwf3
     wfc3tools.calwf3.calwf3(raw)
@@ -206,18 +208,52 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             
             print '\n*** Flatten ramp ***'
             ima = pyfits.open(raw.replace('raw', 'ima'), mode='update')
-                        
-            total_countrate = np.median(ima['SCI',1].data)
+            
+            #### Grism exposures aren't flat-corrected
+            filter = ima[0].header['FILTER']
+            if 'G1' in filter:
+                flats = {'G102': 'uc72113oi_pfl.fits', 
+                         'G141': 'uc721143i_pfl.fits'}
+                
+                flat = pyfits.open('%s/%s' %(os.getenv('iref'), flats[filter]))[1].data
+            else:
+                flat = 1.
+            
+            #### Remove the variable ramp            
+            total_countrate = np.median(ima['SCI',1].data/flat)
             for i in range(ima[0].header['NSAMP']-2):
+                ima['SCI',i+1].data /= flat
                 med = np.median(ima['SCI',i+1].data)
                 print 'Read #%d, background:%.2f' %(i+1, med)
                 ima['SCI',i+1].data += total_countrate - med
             
+            if 'G1' in filter:
+                for i in range(ima[0].header['NSAMP']-2):
+                    ima['SCI',i+1].data *= flat
+            
             ima[0].header['CRCORR'] = 'PERFORM'
             ima[0].header['DRIZCORR'] = 'OMIT'
             
+            ### May need to generate an simply dummy ASN file for a single exposure
+            if ima[0].header['ASN_ID'] == 'NONE':
+                import stsci.tools
+                
+                exp = ima.filename().split('_ima')[0]
+                params = stsci.tools.asnutil.ASNMember()
+                asn_dict = {'members': {exp:params},
+                            'order': [exp],
+                            'output': exp}
+                                
+                asn = stsci.tools.asnutil.ASNTable(output=exp)
+                asn['members'] = {exp:params}
+                asn['order'] = [exp]
+                asn.write()
+                
+                ima[0].header['ASN_ID'] = exp.upper()
+                ima[0].header['ASN_TAB'] = '%s_asn.fits' %(exp)
+                
             ima.flush()
-            
+                                
             #### Initial cleanup
             files=glob.glob(raw.replace('raw', 'ima_*'))
             for file in files:
@@ -226,6 +262,8 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         
             #### Run calwf3 on cleaned IMA
             wfc3tools.calwf3.calwf3(raw.replace('raw', 'ima'))
+            
+            #return False
             
             ima = pyfits.open(raw.replace('raw', 'ima_ima'))
             flt_new = pyfits.open(raw.replace('raw', 'ima_flt'))

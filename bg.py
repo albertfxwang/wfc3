@@ -2132,11 +2132,11 @@ def future_ephem():
     e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_dec11_13498.reform', unpack=True, dtype=np.str)
     
     field='MACS0416'
-    fig, ax = mywfc3.bg.show_object_phase(ra=64.0349, dec=-24.0724, field=field)
+    fig, ax = mywfc3.bg.show_object_phase(ra=64.0349, dec=-24.0724, field=field, year=(2015,2))
     e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_m0416.reform', unpack=True, dtype=np.str)
     
     field='MACS1149'
-    fig, ax = mywfc3.bg.show_object_phase(ra=177.3987, dec=22.3985, field=field)
+    fig, ax = mywfc3.bg.show_object_phase(ra=177.3987, dec=22.3985, field=field, year=(2015,2))
     e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_upcoming_13504_aug14.reform', unpack=True, dtype=np.str)
 
     field='GOODSS'

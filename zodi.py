@@ -95,10 +95,22 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     
     #ra, dec = 34.440618, -5.1721396
     eq = icrs(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    try:
+        eq.ra.format = eq.ra.to_string
+        eq.dec.format = eq.dec.to_string
+    except:
+        pass
+        
     equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
     eclip_obs = ephem.Ecliptic(equat)
     
     eq = icrs(ra=ra_sun, dec=dec_sun, unit=(u.deg, u.deg))
+    try:
+        eq.ra.format = eq.ra.to_string
+        eq.dec.format = eq.dec.to_string
+    except:
+        pass
+
     equat = ephem.Equatorial(str(eq.ra.format(sep=':', unit=u.hour)), str(eq.dec.format(sep=':', unit=u.deg)), epoch=ephem.J2000)
     eclip_sun = ephem.Ecliptic(equat)
     
