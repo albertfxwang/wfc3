@@ -94,7 +94,7 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     else:
         return cube, dq, time, NSAMP
         
-def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True):
+def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True, stats_region=[[0,1014], [0,1014]]):
     """
     Run calwf3, if necessary, to generate ima & flt files.  Then put the last
     read of the ima in the FLT SCI extension and let Multidrizzle flag 
@@ -220,10 +220,12 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
                 flat = 1.
             
             #### Remove the variable ramp            
-            total_countrate = np.median(ima['SCI',1].data/flat)
+            slx = slice(stats_region[0][0], stats_region[0][1])
+            sly = slice(stats_region[1][0], stats_region[1][1])
+            total_countrate = np.median((ima['SCI',1].data/flat)[sly, slx])
             for i in range(ima[0].header['NSAMP']-2):
                 ima['SCI',i+1].data /= flat
-                med = np.median(ima['SCI',i+1].data)
+                med = np.median(ima['SCI',i+1].data[sly, slx])
                 print 'Read #%d, background:%.2f' %(i+1, med)
                 ima['SCI',i+1].data += total_countrate - med
             
@@ -234,7 +236,8 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             ima[0].header['CRCORR'] = 'PERFORM'
             ima[0].header['DRIZCORR'] = 'OMIT'
             
-            ### May need to generate an simply dummy ASN file for a single exposure
+            ### May need to generate a simple dummy ASN file for a single exposure
+            ### Not clear why calwf3 needs an ASN if DRIZCORR=OMIT, but it does
             if ima[0].header['ASN_ID'] == 'NONE':
                 import stsci.tools
                 
@@ -355,7 +358,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     if remove_ima:
         os.remove(raw.replace('raw', 'ima'))
 
-def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=True):
+def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=True, stats_region=[[0,1014], [0,1014]]):
     """
     Make a figure (.ramp.png) showing the individual reads of an 
     IMA or RAW file.
@@ -400,7 +403,9 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         dt = np.diff(time)
     
     ####  Average ramp
-    ramp_cps = np.median(diff, axis=1)
+    slx = slice(stats_region[0][0], stats_region[0][1])
+    sly = slice(stats_region[1][0], stats_region[1][1])
+    ramp_cps = np.median(diff[:, sly, slx], axis=1)
     avg_ramp = np.median(ramp_cps, axis=1)
     
     #### Initialize the figure
