@@ -369,7 +369,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
             print 'JIF: in=%.3f out=%.3f' %(dt_in, dt_out)
             if dt_in > 0:
                 yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*GAIN)[ok])
-                ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color='green', alpha=0.8)
+                ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color=j, alpha=0.8)
             #
             if (dt_out > 0) & (dt_out < time.max()):
                 yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*GAIN)[ok])
@@ -390,6 +390,13 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
             #ax3.plot(((pstr-tstr).sec + ext.data['Seconds'][in_shadow])/60., ext.data['Seconds'][in_shadow]*0.+2, color='green')
             shadow_flag[in_shadow] = 1
             shadow_flag[~in_shadow] = 0
+            
+            ## Show shadow
+            xshad = (astropy.time.Time([shadow_in, shadow_out])-tstr).sec/60.
+            ax3.plot(np.ones(2)*(shadow_in-tstr).sec/60., [0,20], color='green', linewidth=2, alpha=0.3)
+            ax3.plot(np.ones(2)*(shadow_out-tstr).sec/60., [0,20], color='red', linewidth=2, alpha=0.3)
+            #ax3.fill_between(xshad, [0,0], [20,20], color='black', alpha=0.1)
+            #print xshad
             
         #### Make log
         idx = np.arange(len(time)-1)[ok]
@@ -2038,7 +2045,11 @@ def future_ephem():
     
     os.system('cat 13779v3A.cal | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > 13779v3A.cal.reform')
     
-    e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v3A.cal.reform', unpack=True, dtype=np.str)
+    raw_ephem = '13779v3A.july.cal'
+
+    os.system('cat %s | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | grep -e SHADOW -e SAA -e TGT | awk \'{print $1, $2, $3, $4}\' > %s.reform' %(raw_ephem, raw_ephem))
+    
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('%s.reform' %(raw_ephem), unpack=True, dtype=np.str)
     
     #e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_past_1.reform', unpack=True, dtype=np.str)
     
@@ -2124,6 +2135,8 @@ def future_ephem():
     plt.savefig('ephem_%s.png' %(t0.iso))
     plt.close()
     t0 = times[i]
+    
+    return True
     
     ### test phasing
         

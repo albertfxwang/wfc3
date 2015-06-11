@@ -99,7 +99,7 @@ def make_cleaned():
     zodi_dq = zodi*0
     
     ### G141
-    os.chdir("/Volumes/3DHST_Gabe/MasterBackground")
+    os.chdir("/Volumes/3DHST_Gabe/MasterBackgroundG141")
     mask_ext = '_flt_mask'
     #mask_ext = '_flt.seg' ### WISPS
     files = glob.glob('IMA/*%s.fits' %(mask_ext))
@@ -466,6 +466,19 @@ def make_cleaned():
     cy = polyfit(xarr-507, sy, 5)
     model_sl = ((np.ones((1014, 1014)) * polyval(cx, xarr-507)).T*(polyval(cy, xarr-507))).T
     pyfits.writeto('G141_scattered_light.fits', data=model_sl, clobber=True)
+    
+    from astropy.modeling import models, fitting
+    yi, xi = np.indices(diff.shape)
+    yi = (yi-507)/507.
+    xi = (xi-507)/507.
+    mask = (ex > 0) & (sl > 0)
+    
+    p_init = models.Polynomial2D(degree=5)
+    #fit_p = fitting.LevMarLSQFitter()
+    fit_p = fitting.LinearLSQFitter()
+    p = fit_p(p_init, xi[mask], yi[mask], diff[mask])
+    model = p(xi, yi)
+    pyfits.writeto('G141_scattered_light_v2.fits', data=model, clobber=True)
     
     #### Clean up final version
     flat_140 = pyfits.open('%s/uc721143i_pfl.fits' %(os.getenv('iref')))[1].data
@@ -1150,9 +1163,339 @@ def test_results():
         
     #
     
+def count_inputs():
+    """
+    Count visits, exposures, reads
+    """
+    import os
+    import numpy as np
     
+    os.chdir("/Volumes/3DHST_Gabe/MasterBackground")
     
-          
+    grism = 'G141'
+    lines = open('%s.visits.dat' %(grism)).readlines()
+    
+    reads = np.unique(['%s' %(line.split()[0]) for line in lines])
+    exposures = np.unique(['%s' %(read.split('_')[0]) for read in reads])
+    visits = np.unique(['%s' %(exp[:6]) for exp in exposures])
+    programs = np.unique(['%s' %(exp[:4]) for exp in exposures])
+    
+    print '%s R=%d E=%d V=%d P=%s' %(grism, len(reads), len(exposures), len(visits), ','.join(programs))
+    
+    # G102 R=3671 E=307 V=54  P=ibkn,ibrh,ibzu,ic14,ic1b,icat 
+    #                           12203,12590, 12896, 12946, 13420
+    # G141 R=8959 E=772 V=234 P=ib37,ibhj,ibhm,ic3t,icdx,icdy 
+    #                            11600, 12177, 12328, 12902, 13352, 13517
+    
+
+def show_results():
+    """
+    Run 3D-HST background subtraction, show column-averages of residuals
+    """
+    
+    import os
+    import glob
+    import time
+    
+    import astropy.io.fits as pyfits
+    from astropy.table import Table as table
+    
+    import threedhst
+    import threedhst.prep_flt_astrodrizzle as init
+    
+    import unicorn
+    import unicorn.interlace_test as test
+                
+    if False:
+        
+        #### Make ASN files
+        unicorn.candels.make_asn_files(uniquename=False)
+            
+        #### Run main preparation wrapper to align to reference and 
+        #### subtract backgrounds
+        root = 'goodss-07'
+        init.prep_direct_grism_pair(direct_asn=root+'-F140W_asn.fits', grism_asn=root+'-G141_asn.fits', radec='../goodss_radec.dat', raw_path='../RAW/', mask_grow=16, scattered_light=False, final_scale=None, skip_direct=True, ACS=False, align_threshold=8, column_average=False)
+
+        #### With column average
+        init.prep_direct_grism_pair(direct_asn=root+'-F140W_asn.fits', grism_asn=root+'-G141_asn.fits', radec='../goodss_radec.dat', raw_path='../RAW/', mask_grow=16, scattered_light=False, final_scale=None, skip_direct=True, ACS=False, align_threshold=8, column_average=True)
+    
+    ### Show results
+    os.chdir('/Users/brammer/WFC3/ISRs/2014_MasterBG/Data/Show')
+    threedhst.process_grism.fresh_flt_files('goodss-07-G141_asn.fits')
+    
+    flat = pyfits.open('/Users/brammer/Research//HST/IREF/uc721143i_pfl.fits')[1].data[5:-5,5:-5]*1.
+    gflat = pyfits.open('/Users/brammer/Research//HST/IREF/u4m1335mi_pfl.fits')[1].data[5:-5,5:-5]*1.
+    flat /= gflat
+    
+    zodi_flt = 'ibhj07ygq_flt.fits'
+    zodi = pyfits.open(zodi_flt)
+    he_flt = 'ibhj07ynq_flt.fits'
+    he = pyfits.open(he_flt)
+    
+    zodi_mask = pyfits.open('../PREP_Best/%s' %(zodi_flt.replace('.fits','.seg.fits')))[0].data == 0
+    he_mask = pyfits.open('../PREP_Best/%s' %(he_flt.replace('.fits','.seg.fits')))[0].data == 0
+    
+    zodi_mask &= (zodi['DQ'].data == 0)
+    he_mask &= (he['DQ'].data == 0)
+    
+    import numpy.ma as ma
+    m_zodi = ma.masked_array(zodi[1].data/flat, mask=(~zodi_mask))
+    col_zodi = ma.median(m_zodi, axis=0)
+
+    m_he = ma.masked_array(he[1].data/flat, mask=(~he_mask))
+    col_he = ma.median(m_he, axis=0)
+    
+    CONF = os.getenv('THREEDHST')+'/CONF'
+    components = np.array([pyfits.open('%s/WFC3.IR.G141.sky.V1.0.flat.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/zodi_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/excess_lo_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/G141_scattered_light.fits' %(CONF))[0].data.flatten()])
+    #
+    components = np.array([pyfits.open('%s/WFC3.IR.G141.sky.V1.0.flat.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/zodi_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/excess_lo_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/G141_scattered_light_v2.fits' %(CONF))[0].data.flatten()])
+    
+    # components = np.array([pyfits.open('%s/WFC3.IR.G141.sky.V1.0.flat.fits' %(CONF))[0].data.flatten(),
+    #               pyfits.open('%s/zodi_G141_clean.fits' %(CONF))[0].data.flatten(),
+    #               pyfits.open('%s/excess_lo_G141_clean.fits' %(CONF))[0].data.flatten(),
+    #               pyfits.open('%s/scattered_light_v1.0.fits' %(CONF))[0].data.flatten()])
+    
+    #fig = plt.figure(figsize=[8,4])
+    fig = unicorn.plotting.plot_init(xs=7, aspect=0.5, square=True, left=0.01, right=0.01, top=0.01, bottom=0.01, use_tex=True, NO_GUI=True)
+    
+    from matplotlib import gridspec
+    gs = gridspec.GridSpec(2, 2, width_ratios=[1,1], height_ratios=[4,1])
+    
+    #ax_zodi = fig.add_subplot(121)
+    ax_zodi = fig.add_subplot(gs[0])
+    ax_rzodi = fig.add_subplot(gs[2])
+    ax_zodi.plot(col_zodi, color='black', alpha=0.7, linewidth=2)
+
+    #ax_he = fig.add_subplot(122)
+    ax_he = fig.add_subplot(gs[1])
+    ax_rhe = fig.add_subplot(gs[3])
+    ax_he.plot(col_he, color='black', alpha=0.7, linewidth=2)
+    
+    colors = ['blue', 'orange', 'red']
+    labels = ['WFC3.IR.G141.sky.V1.0.fits', 'zodi + He', 'zodi + He + scattered light']
+    for i in range(3):
+        if i == 0:
+            best_zodi = pyfits.open('../PREP_Axe/%s' %(zodi_flt))
+            h = best_zodi[0].header; coeffs_zodi = [h['GSKY00']+h['GSKY01'], 0, 0, 0]
+            best_he = pyfits.open('../PREP_Axe/%s' %(he_flt))
+            h = best_he[0].header; coeffs_he = [h['GSKY00']+h['GSKY01'], 0, 0, 0]
+    
+        elif i == 1:
+            best_zodi = pyfits.open('../PREP_NoScattered/%s' %(zodi_flt))
+            h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], 0]
+            best_he = pyfits.open('../PREP_NoScattered/%s' %(he_flt))
+            h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], 0]
+
+        else: 
+            best_zodi = pyfits.open('../PREP_Best/%s' %(zodi_flt))
+            h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+            best_he = pyfits.open('../PREP_Best/%s' %(he_flt))
+            h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+    
+            best_zodi = pyfits.open('../PREP_NewScattered/%s' %(zodi_flt))
+            h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+            best_he = pyfits.open('../PREP_NewScattered/%s' %(he_flt))
+            h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+    
+        model = np.dot(coeffs_zodi, components).reshape((1014,1014))
+        mm_zodi = ma.masked_array(model, mask=(~zodi_mask))
+        colm_zodi = ma.median(mm_zodi, axis=0)
+        ax_zodi.plot(colm_zodi, color=colors[i], alpha=0.8)
+        ax_rzodi.plot(col_zodi-colm_zodi, color=colors[i], alpha=0.8)
+
+        model = np.dot(coeffs_he, components).reshape((1014,1014))
+        mm_he = ma.masked_array(model, mask=(~he_mask))
+        colm_he = ma.median(mm_he, axis=0)
+        ax_he.plot(colm_he, color=colors[i], alpha=0.8, label=labels[i])
+        ax_rhe.plot(col_he-colm_he, color=colors[i], alpha=0.8)
+    
+    ax_zodi.set_ylabel(r'Flux, e$^-$/s')
+    ax_he.legend(fontsize=10, loc='lower right', frameon=False)
+    ax_zodi.text(0.05, 0.95, zodi_flt.split('_')[0], ha='left', va='top', transform=ax_zodi.transAxes, fontsize=9)
+    ax_he.text(0.05, 0.95, he_flt.split('_')[0], ha='left', va='top', transform=ax_he.transAxes, fontsize=9)
+    
+    for ax in fig.axes:
+        ax.set_xlim(0,1014)
+    
+    for ax in [ax_zodi, ax_he]:
+        ax.set_xticklabels([])
+    
+    for ax in [ax_rzodi, ax_rhe]:
+        ax.set_xlabel(r'$x$')
+        ax.set_ylim(-0.02, 0.02)
+        ax.set_yticks(np.arange(-0.02,0.021,0.01))
+    fig.tight_layout(pad=0.1)
+    
+    unicorn.plotting.savefig(fig, 'column_residuals_v2.pdf')
+    
+    if False:
+        #### Compute flux levels as a function of magnitude
+        twod = unicorn.reduce.Interlace2D('MACS1149-SN-111-G141_00002.2D.fits')
+        
+        import pysynphot as S
+        spec = S.FlatSpectrum(1.e-17, fluxunits='flam').renorm(23.7, 'ABMag', S.ObsBandpass('wfc3,ir,f160w'))
         
         
-              
+        twod.compute_model(spec.wave, spec.flux/1.e-17/twod.total_flux)
+        obs = S.Observation(spec, S.ObsBandpass('wfc3,ir,g141'))
+        
+        xspec, yspec = twod.trace_extract(twod.model, width=2)
+        
+        ### Show images        
+        best_zodi = pyfits.open('../PREP_Best/%s' %(zodi_flt))
+        h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+        best_he = pyfits.open('../PREP_Best/%s' %(he_flt))
+        h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+
+        best_zodi = pyfits.open('../PREP_NewScattered/%s' %(zodi_flt))
+        h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+        best_he = pyfits.open('../PREP_NewScattered/%s' %(he_flt))
+        h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], h['GSKY02']]
+        
+        # best_zodi = pyfits.open('../PREP_NoScattered/%s' %(zodi_flt))
+        # h = best_zodi[0].header; coeffs_zodi = [0, h['GSKY00'], h['GSKY01'], 0]
+        # best_he = pyfits.open('../PREP_NoScattered/%s' %(he_flt))
+        # h = best_he[0].header; coeffs_he = [0, h['GSKY00'], h['GSKY01'], 0]
+
+        he_model = np.dot(coeffs_he, components).reshape((1014,1014))
+        mm_he = ma.masked_array(he_model, mask=(~he_mask))
+        colm_he = ma.median(mm_he, axis=0)
+        
+        zodi_model = np.dot(coeffs_zodi, components).reshape((1014,1014))
+        mm_zodi = ma.masked_array(zodi_model, mask=(~zodi_mask))
+        colm_zodi = ma.median(mm_zodi, axis=0)
+        
+        plt.summer(); plt.close()
+        
+        fig = unicorn.plotting.plot_init(xs=7, aspect=1./2*1.03, square=True, left=0.01, right=0.01, top=0.01, bottom=0.01, use_tex=True, NO_GUI=True)
+        
+        import scipy.ndimage as nd
+        
+        filter, g = nd.gaussian_filter, 8
+        filter, g = nd.median_filter, 8
+        
+        ax = fig.add_subplot(245)
+        ax.imshow(filter(he[1].data/flat*he_mask-1.65+(he_mask == 0)*1.65, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        ax.text(0.5, 0.95, he_flt.split('_')[0], fontsize=8, va='top', ha='center', transform=ax.transAxes)
+        
+        ax = fig.add_subplot(246)
+        ax.imshow(filter(he_model-1.65, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        
+        ax = fig.add_subplot(247)
+        ax.imshow(filter((he[1].data/flat-he_model)*he_mask, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        
+        ax = fig.add_subplot(248)
+        ax.imshow(filter((he[1].data/flat-he_model+colm_he-col_he)*he_mask, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+
+        ax = fig.add_subplot(241)
+        ax.imshow(filter(zodi[1].data/flat*zodi_mask-0.875+(zodi_mask == 0)*0.875, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        ax.text(0.5, 0.95, zodi_flt.split('_')[0], fontsize=8, va='top', ha='center', transform=ax.transAxes)
+
+        ax = fig.add_subplot(242)
+        ax.imshow(filter(zodi_model-0.875, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        ax.text(0.5, 0.95, 'Component model', fontsize=8, va='top', ha='center', transform=ax.transAxes)
+
+        ax = fig.add_subplot(243)
+        ax.imshow(filter((zodi[1].data/flat-zodi_model)*zodi_mask, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        ax.text(0.5, 0.95, 'Residuals', fontsize=8, va='top', ha='center', transform=ax.transAxes)
+        
+        ax = fig.add_subplot(244)
+        ax.imshow(filter((zodi[1].data/flat-zodi_model+colm_zodi-col_zodi)*zodi_mask, g), vmin=-0.05, vmax=0.05, interpolation='Nearest')
+        ax.text(0.5, 0.95, 'Column average correction', fontsize=8, va='top', ha='center', transform=ax.transAxes)
+        
+        for ax in fig.axes:
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            ax.set_xlim(0,1014); ax.set_ylim(0,1014)
+            
+        fig.tight_layout(w_pad=0.0, h_pad=1.6, pad=0.1)
+        #fig.tight_layout(w_pad=0.0, h_pad=1.6, pad=0.05)
+        
+        unicorn.plotting.savefig(fig, '2D_residuals_v2.pdf', dpi=150)
+        
+def scattered():
+    
+    CONF = os.getenv('THREEDHST')+'/CONF'
+    components = np.array([pyfits.open('%s/WFC3.IR.G141.sky.V1.0.flat.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/zodi_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/excess_lo_G141_clean.fits' %(CONF))[0].data.flatten(),
+                  pyfits.open('%s/G141_scattered_light_v2.fits' %(CONF))[0].data.flatten()])
+    
+    #
+    flat = pyfits.open('%s/uc721143i_pfl.fits' %(os.getenv('iref')))[1].data
+    flat_g141 = pyfits.open('%s/u4m1335mi_pfl.fits' %(os.getenv('iref')))[1].data
+    flat /= flat_g141
+    
+    ##### Better scattered light model
+    files=glob.glob('../RAW/*ima.fits')
+    img = np.zeros((1014,1014))
+    N = img*0.
+    
+    for file in files:
+        im = pyfits.open(file)
+        mask = pyfits.open(file.replace('ima.fits', 'flt.seg.fits.gz'))[0].data == 0
+        mask &= (im['dq',1].data[5:-5,5:-5] & 4) == 0
+        clean = (im['sci',1].data[5:-5,5:-5]/flat - 0.95*components[1,:].reshape((1014,1014)) - 0.93*components[2,:].reshape((1014,1014)))
+        sl = slice(100,200)
+        sub = (clean*mask)[sl, sl]
+        scl = np.median(sub[sub > 0])
+        img += clean * mask / scl
+        N += mask*1
+    
+    avg = img/N
+    mask = N > 0
+    avg[~mask] = 0
+    yi, xi = np.indices(avg.shape)
+    yi = (yi-507)/507.
+    xi = (xi-507)/507.
+    
+    from astropy.modeling import models, fitting
+    p_init = models.Polynomial2D(degree=16)
+    #fit_p = fitting.LevMarLSQFitter()
+    fit_p = fitting.LinearLSQFitter()
+    p = fit_p(p_init, xi[mask], yi[mask], avg[mask])
+    model = p(xi, yi)
+    
+    pyfits.writeto('../scattered_light_v1.0.fits', data=model, clobber=True)
+    pyfits.writeto('../x_slope.fits', data=xi, clobber=True)
+    pyfits.writeto('../y_slope.fits', data=yi, clobber=True)
+    
+    ima = pyfits.open('../RAW/ib3702u8q_ima.fits')
+    #ima = pyfits.open('../RAW/ib3702uoq_ima.fits')
+    sz, sh = 0.95, 0.9
+    sci = (ima['sci',1].data/flat)[5:-5,5:-5] - sz*components[1,:].reshape((1014,1014)) - sh*components[2,:].reshape((1014,1014))
+    
+    #show = True
+
+    plt.gray(); plt.close()
+    
+    fig = unicorn.plotting.plot_init(xs=7, aspect=0.5*1.0, square=True, left=0.01, right=0.01, top=0.01, bottom=0.01, use_tex=show, NO_GUI=show)
+    
+    ax = fig.add_subplot(121)
+    #s=5
+    ax.imshow(components[3,:].reshape((1014,1014))*s, vmin=-0.1, vmax=1, interpolation='Nearest')
+    ax.set_title('G141\_scattered\_light\_v2.fits')
+    ax = fig.add_subplot(122)
+    #ds9.view(sci)
+    
+    #scl = 0.8
+    ax.imshow(sci*scl, vmin=-0.1, vmax=1, interpolation='Nearest')
+    ax.set_title(os.path.basename(ima.filename()).split('_')[0])
+    
+    for ax in fig.axes:
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_xlim(0,1014); ax.set_ylim(0,1014)
+        
+    fig.tight_layout(w_pad=0.1, h_pad=1., pad=1)
+    #fig.tight_layout(w_pad=0.0, h_pad=1.6, pad=0.05)
+    
+    unicorn.plotting.savefig(fig, 'scattered_light.pdf', dpi=150)
+    
+        

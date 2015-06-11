@@ -3,17 +3,17 @@ Scripts to reprocess WFC3 exposures with time-variable backgrounds
 or satellite trails.  
 """
 
-try:
-    import astropy.io.fits as pyfits
-except:
-    import pyfits
+import os
+import glob
+import shutil
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-import os
-import glob
-import shutil
+try:
+    import astropy.io.fits as pyfits
+except:
+    import pyfits
 
 import logging
 logger = logging.getLogger('reprocess_wfc3')
@@ -25,10 +25,6 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s', datefmt='%
 ch.setFormatter(formatter)
 if len(logger.handlers) == 0:
     logger.addHandler(ch)
-
-#logger.info('test')
-
-#logging.basicConfig(format='%(name)s, %(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
 
 def get_flat(hdulist):
     """
@@ -262,8 +258,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             #### Run calwf3 on cleaned IMA
             wfc3tools.calwf3.calwf3(raw.replace('raw', 'ima'))
             
-            #return False
-            
+            #### Put results into an FLT-like file
             ima = pyfits.open(raw.replace('raw', 'ima_ima'))
             flt_new = pyfits.open(raw.replace('raw', 'ima_flt'))
             flt['DQ'].data = flt_new['DQ'].data*1
@@ -469,130 +464,58 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
                 
     return fig
     
-def ramp_crrej(raw):
+def in_shadow(file='ibhj07ynq_raw.fits'):
     """
-    testing xxx
+    Compute which reads in a RAW file were obtained within the Earth SHADOW.  
     
-    Do own CR-rejection
+    Requires the associated JIF files that contain this information, for example
+    "ibhj07040_jif.fits" for the default data file.  These can be obtained by requesting
+    the "observation log" files from MAST.
+    
     """
-    import wfc3tools
+    import astropy.time
+    import astropy.io.fits as pyfits
+    import numpy as np
     
-    ### Run calwf3
-    if not os.path.exists(raw.replace('raw', 'ima')):
-        ### Remove existing products or calwf3 will die
-        if os.path.exists(raw.replace('raw', 'flt')):
-            os.remove(raw.replace('raw', 'flt'))
-        
-        wfc3tools.calwf3.calwf3(raw)
-        
-    ima = pyfits.open(raw.replace('raw', 'ima'))
-    
-    ### cube: cumulated reads
-    cube, cube_err, dq, time, NSAMP = split_multiaccum(ima, scale_flat=False, get_err=True)
-    ### diff: Delta reads
-    diff = np.diff(cube, axis=0)
-    dt = np.diff(time)
-    
-    ### units right? should be e-/s
-    err = np.sqrt((cube_err[1:,:,:].T/time[1:])**2 + (cube_err[:-1,:,:].T/time[:-1])**2).T
-    # ix = -8
-    # med = np.median((diff[ix,400:600,400:600]/dt[ix]))
-    # rnd = np.random.normal(size=(1024,1024))*err[ix,:,:]+med
-    
-    #### Compute average ramp
-    ## bit mask
-    mask = (dq[-1,:,:] & ~(576+8192+4096+32)) == 0
-    ## bright objects
-    mask &= np.abs((diff[-1,:,:]-np.median(diff[-1,:,:]))/dt[-1]) < 5*err[-1,:,:]
-    
-    #### countrate:  delta countrate, minus average ramp
-    countrate = diff*0.
-    ramp = dt*0.
-    for i in range(len(dt)):
-        ramp[i] = np.median(diff[i,:,:][mask])/dt[i]
-        countrate[i,:,:] = diff[i,:,:]/dt[i]-ramp[i]
-    
-    #### CR rejection:  (countrate_i - med)/err > threshold    
-    med = np.median(countrate, axis=0)
-    cr_full = ~np.isfinite(med)
-    sum = cr*0.
-    sum_time = sum*0.
-    for i in range(5,len(dt)):
-        cr = (countrate[i,:,:]-med)/err[i,:,:] < 15
-        cr_full |= cr
-        sum += countrate[i,:,:]*dt[i]*cr
-        sum_time += dt[i]*cr
-    
-def split_ima():
-    """
-    Testing splitting IMA into individual flt files
-    """
-    import scipy.ndimage as nd
-    
-    ima_file = 'ibp329isq_ima.fits'
-    ima = pyfits.open(ima_file)   
-     
-    #### Split the multiaccum file into individual reads    
-    cube, cube_err, dq, time, NSAMP = mywfc3.reprocess_wfc3.split_multiaccum(ima, scale_flat=False, get_err=True)
-        
-    #
-    dark_file = ima[0].header['DARKFILE'].replace('iref$', os.getenv('iref')+'/')
-    dark = pyfits.open(dark_file)
-    dark_cube, dark_dq, dark_time, dark_NSAMP = mywfc3.reprocess_wfc3.split_multiaccum(dark, scale_flat=False)
-    
-    #
-    #### Readnoise in 4 amps
-    readnoise_2D = np.zeros((1024,1024))
-    readnoise_2D[512: ,0:512] += ima[0].header['READNSEA']
-    readnoise_2D[0:512,0:512] += ima[0].header['READNSEB']
-    readnoise_2D[0:512, 512:] += ima[0].header['READNSEC']
-    readnoise_2D[512: , 512:] += ima[0].header['READNSED']
-    readnoise_2D = readnoise_2D**2
+    #### Open the raw file
+    raw = pyfits.open(file)
+    NSAMP = raw[0].header['NSAMP']
 
-    #### Gain in 4 amps
-    gain_2D = np.zeros((1024,1024))
-    gain_2D[512: ,0:512] += ima[0].header['ATODGNA']
-    gain_2D[0:512,0:512] += ima[0].header['ATODGNB']
-    gain_2D[0:512, 512:] += ima[0].header['ATODGNC']
-    gain_2D[512: , 512:] += ima[0].header['ATODGND']
+    #### Find JIF file.  Can either be association or single files
+    if raw[0].header['ASN_ID'] == 'NONE':
+        exp = raw[0].header['ROOTNAME']
+        jif = pyfits.open(exp[:-1]+'j_jif.fits')[1]
+    else:
+        exp = raw[0].header['ROOTNAME']
+        asn = raw[0].header['ASN_TAB']
+        jif = pyfits.open(asn.replace('asn', 'jif'))
+        for i in range(len(jif)-1):
+            if jif[i+1].header['EXPNAME'][:-1] == exp[:-1]:
+                jif = jif[i+1]
+                break
     
-    #### Need flat for Poisson
-    flat_file = ima[0].header['PFLTFILE'].replace('iref$', os.getenv('iref')+'/')
-    flat = pyfits.open(flat_file)#[1].data
-    ff = flat[1].data
+    #### Shadow timing (last entry and exit)
+    shadow_in = astropy.time.Time(jif.header['SHADOENT'].replace('.',':'), 
+                        format='yday', in_subfmt='date_hms', scale='utc')
+                        
+    shadow_out = astropy.time.Time(jif.header['SHADOEXT'].replace('.',':'), 
+                        format='yday', in_subfmt='date_hms', scale='utc')
     
-    #### Subtract diffs if flagged reads
-    diff = np.diff(cube, axis=0)
-    dark_diff = np.diff(dark_cube, axis=0)
-    
-    dt = np.diff(time)
-    
-    diff_var = diff*0.
-    diff_err = diff*0.
-    for i in range(diff.shape[0]):
-        diff_var[i,:,:] = readnoise_2D*1.
-        diff_var[i,:,:] += (diff[i,:,:]*ff + dark_diff[i,:,:]*gain_2D)*(gain_2D/2.368)
-        diff_var[i,:,:] += (diff[i,:,:]*ff*flat['ERR'].data)**2
-        diff_err[i,:,:] = np.sqrt(diff_var[i,:,:])/ff/(gain_2D/2.368)/1.003448
-    
-    flt = pyfits.open(ima_file.replace('ima','flt'))
-    
-    letters = 'abcdefghijklmnoprstuv'
-    for i in range(1, diff.shape[0]):
-        dq_i = dq[i+1]
-        crset = (dq_i & 8192) > 0
-        dq_i[crset] -= 8192
-        flt['SCI'].data = diff[i,5:-5,5:-5]/dt[i]
-        flt['SCI'].data += 1-np.median(flt['SCI'].data)
-        flt['ERR'].data = diff_err[i,5:-5,5:-5]/dt[i]
-        flt['DQ'].data = dq_i[5:-5,5:-5]
-        flt.writeto(flt.filename().replace('q_', letters[i-1]+'_'), clobber=True)
+    #### Array of read timings
+    t0 = []
+    for i in range(NSAMP):
+        h = raw['sci',i+1].header
+        ti = astropy.time.Time(h['ROUTTIME'], format='mjd', scale='utc')
+        t0.append(ti)
         
-    import drizzlepac
-    read_files=glob.glob('*[a-p]_flt.fits')
-    drizzlepac.astrodrizzle.AstroDrizzle(read_files, output='test', clean=True, context=False, preserve=False, skysub=True, driz_separate=True, driz_sep_wcs=True, median=True, blot=True, driz_cr=True, driz_cr_corr=True, driz_combine=True, resetbits=0)
+    t0 = astropy.time.Time(t0)
     
-    drizzlepac.astrodrizzle.AstroDrizzle(flt.filename(), output='testx', clean=True, context=False, preserve=False, skysub=True, driz_separate=True, driz_sep_wcs=True, median=True, blot=True, driz_cr=True, driz_cr_corr=True, driz_combine=True, resetbits=0)
+    #### Test if reads were taken during shadow
+    test_in_shadow = ((t0-shadow_in).sec < (t0-shadow_out).sec) | ((t0-shadow_out).sec < 0)
+
+    return t0, test_in_shadow
     
+                
     
+        
         
