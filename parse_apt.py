@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """
 Parse APT file
+
+- G. Brammer (July 2015)
+
 """
 import os
 

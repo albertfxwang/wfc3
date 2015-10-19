@@ -391,4 +391,39 @@ def ISR_figures_coverage():
     
     unicorn.plotting.savefig(fig, 'orient_area_fraction.pdf'); plt.close()
     
+def avoid_diffraction_spikes(target_pa=-135, target_offset=3, spike_width=0.6, bleed=False):
+    """
+    Return valid APT ORIENT values given a specified target offset pa and distance relative to a bright
+    source.  
+    
+    The diffraction spikes are 45 degrees off of the detector row/columns.
+    
+    If "bleed=True", also avoid relative PAs +/- 180 degrees for pixel bleed from saturated sources
+    """
+    
+    import numpy as np
+    import astropy.coordinates as coo
+    import astropy.units as u
+    
+    avoid_angle = 2*np.arcsin(spike_width/2./target_offset)/np.pi*180
+
+    # PA_Y = orient - 180 + 44.59, spikes offset by 45 degrees
+    
+    targ_pa = coo.angles.Angle(target_pa*u.deg)
+    if bleed:
+        ### pixel bleed at +/- 180 degrees
+        pa_avoid = targ_pa + np.array([45, 135, 180, 225, 315, 360, 405])*u.deg
+    else:
+        ### 45 degree diffraction spikes
+        pa_avoid = targ_pa + (45 + 90*np.arange(5))*u.deg
+
+    orient_avoid = (pa_avoid + (180-44.59)*u.deg) #.wrap_at(360*u.deg)
+    
+    for i in range(len(pa_avoid)-1):
+        print 'Avoid orient %5.1f +/- %.1f' %(orient_avoid[i].wrap_at(360*u.deg).value, avoid_angle)
+    
+    print '\ntarget_pa=%.1f ; target_offset= %.1f ;spike_width=%.1f' %(target_pa, target_offset, spike_width)
+    for i in range(len(pa_avoid)-1):
+        if (orient_avoid[i+1]-orient_avoid[i]) > avoid_angle*2*u.deg:
+            print '  OK Orient: %5.0f - %3.0f' %((orient_avoid[i]+avoid_angle*u.deg).wrap_at(360*u.deg).value, (orient_avoid[i+1]-avoid_angle*u.deg).wrap_at(360*u.deg).value)
     

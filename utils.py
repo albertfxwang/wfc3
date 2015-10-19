@@ -64,5 +64,56 @@ def parse_history():
         if 'F105W' in p['filters'].keys():
             if p['filters']['F105W'] > 2:
                 print prog, p
+
+def program_regions(program=13420, query=None):
+    """
+    Make region files from FLTs in the quicklook archive
+    """
+    import astropy.io.fits as pyfits
+    import astropy.wcs as pywcs
+    import glob
+    import os
     
+    if query is not None:
+        files=glob.glob(query)
+    else:
+        files=glob.glob('/grp/hst/wfc3a/GO_Links/%d/Visit*/*flt.fits' %(program))
+    
+    files.sort()
+    fp = open('%s.reg' %(program),'w')
+    fp.write('fk5\n')
+    
+    old_visit = '--'
+    for file in files:
+        print file
+        im = pyfits.open(file)
+
+        visit = os.path.basename(file)[4:6]
+        if visit == old_visit:
+            visit = ''
+        else:
+            old_visit = visit
+
+        if im[0].header['DETECTOR'] == 'IR':
+            sci_ext = [1]
+            if im[0].header['FILTER'] in ['G102', 'G141']:
+                color='cyan'
+            else:
+                color='green'
+        else:
+            sci_ext = [1,4]
+            color='magenta'
+            
+        for ext in sci_ext:
+            wcs = pywcs.WCS(im[ext].header)
+            footprint = wcs.calc_footprint(undistort=True)
+            poly_coord = ['%.6f, %.6f' %(rd[0], rd[1]) for rd in footprint]
+            fp.write('polygon(%s) # color=%s width=2 text={%s}\n' %(','.join(poly_coord), color, visit))
+        
+        ## Death-star for IR
+        if len(sci_ext) == 1:
+            rd = wcs.wcs_pix2world([357.8],[54.7],1)
+            fp.write('circle(%.6f,%.6f,2.9") # color=%s\n' %(rd[0][0], rd[1][0], color))
+            
+    fp.close()
      

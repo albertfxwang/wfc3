@@ -369,7 +369,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
             print 'JIF: in=%.3f out=%.3f' %(dt_in, dt_out)
             if dt_in > 0:
                 yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*GAIN)[ok])
-                ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color=j, alpha=0.8)
+                ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color='green', alpha=0.8)
             #
             if (dt_out > 0) & (dt_out < time.max()):
                 yi = np.interp(dt_out, (time[1:][ok]), (ramp/dt*GAIN)[ok])
@@ -2045,8 +2045,10 @@ def future_ephem():
     
     os.system('cat 13779v3A.cal | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | awk \'{print $1, $2, $3, $4}\' > 13779v3A.cal.reform')
     
-    raw_ephem = '13779v3A.july.cal'
-
+    raw_ephem = '13779v3I.cal'
+    
+    raw_ephem = '14227_GOODSS.dat'
+    
     os.system('cat %s | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | grep -e SHADOW -e SAA -e TGT | awk \'{print $1, $2, $3, $4}\' > %s.reform' %(raw_ephem, raw_ephem))
     
     e_ttag, e_d, e_item, e_comment = np.loadtxt('%s.reform' %(raw_ephem), unpack=True, dtype=np.str)
