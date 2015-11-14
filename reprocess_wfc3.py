@@ -234,7 +234,14 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             
             ### May need to generate a simple dummy ASN file for a single exposure
             ### Not clear why calwf3 needs an ASN if DRIZCORR=OMIT, but it does
+            need_asn = False
             if ima[0].header['ASN_ID'] == 'NONE':
+                need_asn=True
+            else:
+                if not os.path.exists(ima[0].header['ASN_TAB']):
+                    need_asn=True
+            
+            if need_asn:
                 import stsci.tools
                 
                 exp = ima.filename().split('_ima')[0]
