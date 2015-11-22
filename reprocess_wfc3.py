@@ -34,6 +34,28 @@ def get_flat(hdulist):
     flat_im = pyfits.open(flat_file)
     flat = flat_im[1].data
     return flat_im, flat
+
+def fetch_calibs(ima_file, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/', verbose=True):
+    """
+    Fetch necessary calibration files needed for running calwf3 from STScI FTP
+    """
+    import os
+    
+    if not os.getenv('iref'):
+        print 'No $iref set!  Put it in ~/.bashrc or ~/.cshrc.'
+        return False
+        
+    im = pyfits.open(ima_file)
+    for ctype in ['BPIXTAB', 'CCDTAB', 'OSCNTAB', 'CRREJTAB', 'DARKFILE', 'NLINFILE', 'PFLTFILE', 'IMPHTTAB', 'IDCTAB']:
+        cimg = im[0].header[ctype].split('iref$')[1]
+        if verbose:
+            print 'Calib: %s=%s' %(ctype, cimg)
+        
+        iref_file = os.path.join(os.getenv('iref'), cimg)
+        if not os.path.exists(iref_file):
+            os.system('curl -o %s %s/%s' %(iref_file, ftpdir, cimg))
+    
+    return True
     
 def split_multiaccum(ima, scale_flat=True, get_err=False):
     """
@@ -112,6 +134,10 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     #### Turn off CR rejection    
     raw_im = pyfits.open(raw, mode='update')
     
+    status = fetch_calibs(raw, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
+    if not status:
+        return False
+        
     if not pop_reads:
         raw_im[0].header['CRCORR'] = 'OMIT'
         raw_im.flush()
@@ -371,6 +397,10 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.WARN)
+
+    status = fetch_calibs(raw, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
+    if not status:
+        return False
         
     img = pyfits.open(raw)
     
