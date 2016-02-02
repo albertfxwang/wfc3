@@ -126,7 +126,7 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     
 def get_zodi_SB(lat, lng):
     
-    mat = np.loadtxt('%s/zodiac.txt' %(datapath))
+    mat = np.loadtxt('%s/zodiac.txt' %(datapath()))
     zlat = mat[0,1:]
     xlat = np.arange(len(zlat))
     zlng = mat[1:,0]
