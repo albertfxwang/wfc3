@@ -15,6 +15,9 @@ if hasattr(co, 'ICRS'):
 else:
     icrs = co.ICRSCoordinates
 
+def datapath():
+    return os.path.join(os.path.dirname(__file__), 'data')
+    
 def flt_zodi(image='ibhm04alq_flt.fits', verbose=True, pirzkal=False):
     from subprocess import Popen,PIPE
 
@@ -66,7 +69,7 @@ def compute_zodi(ra, dec, jd, FILTER='F140W', verbose=False):
     if verbose:
         print 'Lat, Lng: %f, %f, SB=%.2f' %(lat, lng, SB+2.5*np.log10(0.128254**2))
         
-    zod = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
+    zod = S.FileSpectrum('%s/zodiacal_model_001.fits' %(datapath()))
     nz = zod.renorm(SB, S.units.VegaMag, S.ObsBandpass("V"))
     bp = S.ObsBandpass('wfc3,ir,%s' %(FILTER.lower()))
     obs = S.Observation(nz, bp)
@@ -78,7 +81,7 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     import ephem
     import cPickle as pickle
     #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
-    fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
+    fp = open('%s/sun_coords.pkl' %(datapath()),'rb')
     hjd = pickle.load(fp)
     hra = pickle.load(fp)
     hdec = pickle.load(fp)
@@ -123,7 +126,7 @@ def helio_lat_lng(ra=0, dec=0, jd=0, fits=None):
     
 def get_zodi_SB(lat, lng):
     
-    mat = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/zodiac.txt')
+    mat = np.loadtxt('%s/zodiac.txt' %(datapath()))
     zlat = mat[0,1:]
     xlat = np.arange(len(zlat))
     zlng = mat[1:,0]
