@@ -430,7 +430,9 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
         img /= np.median(img[400:600,400:600])
         
         if i > -1:
-            ax_im = fig.add_axes((0.05+0.30/2*i*1.05,0.09+0.28*2+0.01,0.30/2.,0.30))
+            #ax_im = fig.add_axes((0.05+0.30/2*i*1.05,0.09+0.28*2+0.01,0.30/2.,0.30))
+            dx = np.minimum(0.99/len(jit)/1.02, 1./6)
+            ax_im = fig.add_axes((0.005+dx*i*1.02,0.09+0.28*2+0.01,dx,0.30))
             ax_im.imshow(img, vmin=0.65, vmax=1/0.57, interpolation='gaussian')
             ax_im.set_xticklabels([]); ax_im.set_yticklabels([])
             trace = np.median(img, axis=0)
@@ -1435,7 +1437,8 @@ def compare_filters_1083():
     #continuum = S.FlatSpectrum(23*1.e-9, fluxunits='photlam')
 
     zodi = S.FileSpectrum('/Users/brammer/WFC3/Backgrounds/Synphot/zodiacal_model_001.fits')
-    nz = zodi.renorm(25, S.units.VegaMag, S.ObsBandpass("V"))
+    #nz = zodi.renorm(25, S.units.VegaMag, S.ObsBandpass("V"))
+    nz = zodi.renorm(25, S.units.VegaMag, S.ObsBandpass("johnson,v"))
     bp = S.ObsBandpass('wfc3,ir,%s' %('F105W'.lower()))
     obs_zodi = S.Observation(nz, bp)
     zodi_refmag = 25+2.5*np.log10(2.84/30.63)
@@ -2048,6 +2051,9 @@ def future_ephem():
     raw_ephem = '13779v3I.cal'
     
     raw_ephem = '14227_GOODSS.dat'
+
+    raw_ephem = 'ephem_goodsn_2016.dat'
+
     
     os.system('cat %s | grep -v "OCC" | sed "s/SAA /SAA/" | sed "s/EXT,L=/EXIT/" | sed "s/ENT,L=/ENTRY/" | sed "s/[\(\)]//g" |grep -v Slew | grep -e SHADOW -e SAA -e TGT | awk \'{print $1, $2, $3, $4}\' > %s.reform' %(raw_ephem, raw_ephem))
     
@@ -2058,7 +2064,7 @@ def future_ephem():
     event = ['%s_%s' %(item, comment) for item, comment in zip(e_item, e_comment)]
     ttag = []
     for tt in e_ttag:
-        ttag.append('2014:'+tt)
+        ttag.append('2016:'+tt)
     
     # for tt in ttag:
     #     times = t.Time(tt, scale='utc', format='yday')
@@ -2158,15 +2164,20 @@ def future_ephem():
     fig, ax = mywfc3.bg.show_object_phase(ra=53.15195, dec=-27.817578, field=field)
     e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v1A.cal.reform', unpack=True, dtype=np.str)
     
-    field='GOODSN'
-    fig, ax = mywfc3.bg.show_object_phase(ra=189.28548, dec=62.232069, field=field)
+    field='GOODSN_2015'
+    fig, ax = mywfc3.bg.show_object_phase(ra=189.28548, dec=62.232069, field=field, year=(2015,1))
     e_ttag, e_d, e_item, e_comment = np.loadtxt('13779v3A.cal.reform', unpack=True, dtype=np.str)
     
+    field='GOODSN_2016'
+    fig, ax = mywfc3.bg.show_object_phase(ra=189.28548, dec=62.232069, field=field, year=(2016,1))
+    e_ttag, e_d, e_item, e_comment = np.loadtxt('ephem_goodsn_2016.dat.reform', unpack=True, dtype=np.str)
+    
+
     ####
     event = ['%s_%s' %(item, comment) for item, comment in zip(e_item, e_comment)]
     ttag = []
     for tt in e_ttag:
-        ttag.append('2014:'+tt)
+        ttag.append('2015:'+tt)
     
     times = t.Time(ttag, scale='utc', format='yday')
     
@@ -2525,4 +2536,9 @@ def get_ned_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
     
     ecl_lon, ecl_lat, dummy_pa = np.cast[float](lines[i+2].split())
     return co.Longitude(ecl_lon, unit=u.deg), co.Latitude(ecl_lat, unit=u.deg)
+
+    
+    
+    
+    
     

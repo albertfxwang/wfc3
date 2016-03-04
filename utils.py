@@ -65,6 +65,41 @@ def parse_history():
             if p['filters']['F105W'] > 2:
                 print prog, p
 
+def esa_fetch(program=14227):
+    """
+    Fetch data from the ESA HST archive
+    """
+    
+    url = "http://archives.esac.esa.int/ehst-sl-server/servlet/metadata-action?RESOURCE_CLASS=OBSERVATION&PROPOSAL.PROPOSAL.PROPOSAL_ID=%d&SELECTED_FIELDS=OBSERVATION&RETURN_TYPE=CSV" %(program)
+    os.system('curl -o esa.result.csv "%s"' %(url))
+    
+def fetch_nearby(radec=[40.055709,-1.6262032], r=3, instruments=['WFC3'], min_exptime=50):
+    
+    from threedhst import catIO
+    
+    dd = r/60.
+    dr = dd/np.cos(radec[1]/180*np.pi)
+    
+    instrument_query = ' OR '.join(['INSTRUMENT.INSTRUMENT_NAME = \'%s\'' %(inst) for inst in instruments])
+    
+    url = r"http://archives.esac.esa.int/ehst-sl-server/servlet/metadata-action?RESOURCE_CLASS=SIMPLE_OBSERVATION&SELECTED_FIELDS=SIMPLE_OBSERVATION,INSTRUMENT.INSTRUMENT_NAME,OPTICAL_ELEMENT.OPTICAL_ELEMENT_NAME,PROPOSAL.PROPOSAL_ID,TARGET.TARGET_NAME,&QUERY=(SIMPLE_OBSERVATION.INTENT = 'Science' AND (%s) AND (POSITION.DEC > %.4f AND POSITION.DEC < %.4f AND POSITION.RA > %.4f AND POSITION.RA < %.4f) AND (SIMPLE_OBSERVATION.EXPOSURE_DURATION > %.1f))&ORDER_BY=SIMPLE_OBSERVATION.START_TIME&RETURN_TYPE=CSV" %(instrument_query, radec[1]-dd, radec[1]+dd, radec[0]-dr, radec[0]+dr, min_exptime)
+        
+    os.system('curl -o esa.csv "%s"' %(url.replace(' ', '%20')))
+        
+    query = catIO.Table('esa.csv')
+    
+    ### Get unique visits
+    root = {'WFC3':'I', 'ACS':'J'}
+    
+    base_names = np.unique(['%s%s%s' %(root[l['INSTRUMENT_NAME']], l['PROGRAM_ID'], l['SET_ID']) for l in query])
+    
+    for base in base_names:
+        for ext in [1,2,3,4,5,6]:
+            for extn in ['ASN', 'JIT', 'JIF']:
+                file_base = "%s0%d0_%s" %(base, ext, extn)
+                file_url = r"http://archives.esac.esa.int/ehst-sl-server/servlet/data-action?ARTIFACT_ID=%s" %(file_base)
+                os.system('curl -o %s.fits.gz "%s"' %(file_base.lower(), file_url))
+            
 def program_regions(program=13420, query=None):
     """
     Make region files from FLTs in the quicklook archive

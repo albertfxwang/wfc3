@@ -59,7 +59,7 @@ def compute_zodi(ra, dec, jd, FILTER='F140W', verbose=False):
     """
     import pysynphot as S
         
-    thermal = {'F160W':0.134, 'F140W':0.069, 'F105W':0.051, 'F110W':0.05, 'F125W':0.052, 'F164N':0.0651, 'G141':0.1, 'G102':0.04, 'F098M':0.05}
+    thermal = {'F160W':0.134, 'F140W':0.069, 'F105W':0.051, 'F110W':0.05, 'F125W':0.052, 'F128N': 0.051, 'F130N': 0.051, 'F132N': 0.051, 'F164N':0.0651, 'G141':0.1, 'G102':0.04, 'F098M':0.05}
     
     lat, lng = helio_lat_lng(ra, dec, jd)
     SB = get_zodi_SB(lat, lng)

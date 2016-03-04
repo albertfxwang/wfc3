@@ -8,6 +8,8 @@ import glob
 import shutil
 
 import numpy as np
+import numpy.ma
+
 import matplotlib.pyplot as plt
 
 try:
@@ -112,6 +114,7 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
     else:
         return cube, dq, time, NSAMP
         
+         
 def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True, stats_region=[[0,1014], [0,1014]]):
     """
     Run calwf3, if necessary, to generate ima & flt files.  Then put the last
@@ -455,7 +458,7 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         ax = fig.add_subplot(4,4,j)
         smooth_read = nd.convolve(diff[j,:,:],kernel)
         ax.imshow(smooth_read[5:-5:smooth, 5:-5:smooth]/dt[j], 
-                  vmin=0, vmax=4, origin='lower', cmap=plt.get_cmap('hot'))
+                  vmin=0, vmax=4, origin='lower', cmap=plt.get_cmap('cubehelix'))
         
         ax.set_xticklabels([]); ax.set_yticklabels([])
         ax.text(20,5,'%d' %(j), ha='left', va='bottom', backgroundcolor='white')
