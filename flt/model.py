@@ -1,5 +1,10 @@
 """
 Model grism spectra in individual FLTs
+
+To run the fitting code you need to compile the cython code here with 
+
+   ./setup_interp.py build_ext -i
+   
 """
 import os
 import collections
