@@ -67,7 +67,30 @@ class aXeConf():
                 order += 1
             
             self.orders[beam] = order-1
-            
+
+    def get_beams(self):
+        """
+        Get beam parameters and sensitivity curves
+        """
+        import os
+        import collections
+        from astropy.table import Table
+        
+        self.dxlam = collections.OrderedDict()
+        self.nx = collections.OrderedDict()
+        self.sens = collections.OrderedDict()
+        self.beams = []
+        
+        for beam in self.orders:
+            if self.orders[beam] > 0:
+                self.beams.append(beam)
+                self.dxlam[beam] = np.arange(self.conf['BEAM%s' %(beam)][0], self.conf['BEAM%s' %(beam)][1], dtype=int)
+                self.nx[beam] = int(self.dxlam[beam].max()-self.dxlam[beam].min())+1
+                self.sens[beam] = Table.read('%s/%s' %(os.path.dirname(self.conf_file), self.conf['SENSITIVITY_%s' %(beam)]))
+                self.sens[beam].wave = np.cast[np.double](self.sens[beam]['WAVELENGTH'])
+                self.sens[beam].sens = np.cast[np.double](self.sens[beam]['SENSITIVITY'])
+    
+                
     def field_dependent(self, xi, yi, coeffs):
         """
         aXe field-dependent coefficients
