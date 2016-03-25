@@ -34,8 +34,10 @@ class GrismFLT(object):
         ...
         
     """
-    def __init__(self, file='ico205lwq_flt.fits', refimage=None, segimage=None, refext=0):
-        
+    def __init__(self, file='ico205lwq_flt.fits', refimage=None, segimage=None, refext=0, verbose=True):
+        """
+        Todo: pull out stored PyFITS objects to improve pickling
+        """
         ### Read the FLT FITS File
         self.file = file
         self.im = pyfits.open(self.file)
@@ -57,13 +59,19 @@ class GrismFLT(object):
             self.dmask = self.im['DQ'].data == 0
         else:
             ### Case where FLT is a grism exposure and reference direct image provided
+            if verbose:
+                print 'Blot reference image: %s' %(refimage)
+            
             self.refimage = pyfits.open(refimage)
             self.filter = self.refimage[refext].header['FILTER']
-            
+                            
             self.flam = self.get_blotted_reference(self.refimage, segmentation=False)*photflam[self.filter]
             self.dmask = np.ones((1014,1014), dtype=bool)
         
         if segimage is not None:
+            if verbose:
+                print 'Blot segmentation image: %s' %(segimage)
+            
             self.segimage = pyfits.open(segimage)
             self.process_segimage()
                         
@@ -186,7 +194,10 @@ class GrismFLT(object):
                     print '%d id=%d mag=%.2f' %(i+1, self.catalog['NUMBER'][ok][ix], self.catalog['MAG_AUTO'][ok][ix])
                     for beam in beams:
                         self.compute_model(id=self.catalog['NUMBER'][ok][ix], x=self.catalog['x_flt'][ok][ix], y=self.catalog['y_flt'][ok][ix], beam=beam,  sh=[60, 60], verbose=True, in_place=True)
-                
+        
+        #
+        outm = self.compute_model(id=self.catalog['NUMBER'][ok][ix], x=self.catalog['x_flt'][ok][ix], y=self.catalog['y_flt'][ok][ix], beam='A',  sh=[60, 60], verbose=True, in_place=False)
+        
     def show_catalog_positions(self, ds9=None):
         if not ds9:
             return False
@@ -355,7 +366,7 @@ class GrismFLT(object):
         
         return blotted
         
-    def compute_model(self, id=0, x=588.28, y=40.54, sh=[10,10], xspec=None, yspec=None, beam='A', verbose=False, in_place=True):
+    def compute_model(self, id=0, x=588.28, y=40.54, sh=[10,10], xspec=None, yspec=None, beam='A', verbose=False, in_place=True, outdata=None):
         """
         Compute a model spectrum, so simple!
         
@@ -379,7 +390,7 @@ class GrismFLT(object):
         
         ### Interpolate the sensitivity curve on the wavelength grid. 
         ### xx still doesn't take an arbitrary spectrum as input but assumes F_lambda**beta
-        ysens = unicorn.utils_c.interp_conserve_c(lam, self.conf.sens[beam].wave, self.conf.sens[beam].sens)/1.e17*(lam[1]-lam[0])
+        ysens = unicorn.utils_c.interp_conserve_c(lam, self.conf.sens[beam]['WAVELENGTH'], self.conf.sens[beam]['SENSITIVITY'])/1.e17*(lam[1]-lam[0])
         if xspec is not None:
             yspec_int = unicorn.utils_c.interp_conserve_c(lam, xspec, yspec)
             ysens *= yspec_int
@@ -390,9 +401,10 @@ class GrismFLT(object):
         
         if in_place:
             #self.modelf *= 0
-            out = self.modelf
+            outdata = self.modelf
         else:
-            out = self.modelf*0
+            if outdata is None:
+                outdata = self.modelf*0
         
         ### This is an array of indices for the spectral trace
         try:
@@ -406,10 +418,10 @@ class GrismFLT(object):
         ### Loop over pixels in the direct FLT and add them into a final 2D spectrum (in the full (flattened) FLT frame)
         ## need better handling of segmentation images
         ## big problem:  adds into the output array, initializing full array to zero would be very slow
-        status = disperse.disperse_grism_object(self.clip, self.seg, id, idxl, yfrac[ok], ysens[ok], out, x0, np.array(self.clip.shape), np.array(sh), np.array((1014,1014)))
+        status = disperse.disperse_grism_object(self.clip, self.seg, id, idxl, yfrac[ok], ysens[ok], outdata, x0, np.array(self.clip.shape), np.array(sh), np.array((1014,1014)))
         
         if not in_place:
-            return out
+            return outdata
         else:
             return True
  
@@ -499,7 +511,7 @@ class BeamCutout(object):
         self.yfrac = self.dy-np.floor(self.dy)
         
         dl = np.abs(self.lam[1]-self.lam[0])
-        self.ysens = unicorn.utils_c.interp_conserve_c(self.lam, self.conf.sens[self.beam].wave, self.conf.sens[self.beam].sens)/1.e17*dl
+        self.ysens = unicorn.utils_c.interp_conserve_c(self.lam, self.conf.sens[self.beam]['WAVELENGTH'], self.conf.sens[self.beam]['SENSITIVITY'])/1.e17*dl
         
         self.idxl = np.arange(np.product(self.shg)).reshape(self.shg)[self.dyc+self.cutout_dimensions[0], self.dx-self.dx[0]+self.cutout_dimensions[1]]
         

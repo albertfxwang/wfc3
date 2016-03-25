@@ -11,7 +11,7 @@ ctypedef np.double_t DTYPE_t
 ctypedef np.uint_t UINT_t
 ctypedef np.int_t INT_t
 ctypedef np.int64_t LINT_t
-ctypedef np.float32_t SEGM_t
+ctypedef np.float32_t FTYPE_t
 
 import cython
 
@@ -23,7 +23,7 @@ cdef extern from "math.h":
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.embedsignature(True)
-def disperse_grism_object(np.ndarray[DTYPE_t, ndim=2] flam, np.ndarray[SEGM_t, ndim=2] segm, int seg_id, np.ndarray[LINT_t, ndim=1] idxl, np.ndarray[DTYPE_t, ndim=1] yfrac, np.ndarray[DTYPE_t, ndim=1] ysens, np.ndarray[DTYPE_t, ndim=1] full, np.ndarray[LINT_t, ndim=1] x0, np.ndarray[LINT_t, ndim=1] shd, np.ndarray[LINT_t, ndim=1] sh_thumb, np.ndarray[LINT_t, ndim=1] shg):
+def disperse_grism_object(np.ndarray[DTYPE_t, ndim=2] flam, np.ndarray[FTYPE_t, ndim=2] segm, int seg_id, np.ndarray[LINT_t, ndim=1] idxl, np.ndarray[DTYPE_t, ndim=1] yfrac, np.ndarray[DTYPE_t, ndim=1] ysens, np.ndarray[DTYPE_t, ndim=1] full, np.ndarray[LINT_t, ndim=1] x0, np.ndarray[LINT_t, ndim=1] shd, np.ndarray[LINT_t, ndim=1] sh_thumb, np.ndarray[LINT_t, ndim=1] shg):
 
     cdef int i,j,k1,k2
     cdef unsigned int nk,nl,k,shx,shy
