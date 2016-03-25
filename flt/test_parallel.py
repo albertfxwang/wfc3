@@ -55,6 +55,8 @@ def mp_compute_models():
             FLTs[key] = np.load('flt.npy')[0]
         else:
             self = mywfc3.flt.model.GrismFLT(file='icka01t7q_flt.fits', refimage='F160W_mosaic.fits', segimage='F160W_seg.fits')
+            #xspec = np.arange(1.e4,1.8e4)
+            #yspec = (xspec/1.6e4)**-0.4
             #xsh, ysh, x_rms, y_rms = self.align_bright_objects(xspec=xspec, yspec=yspec, ds9=ds9)
             #self.update_wcs_with_shift(xsh=xsh, ysh=ysh)
             csex = catIO.Table('/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-N_IR.cat')
