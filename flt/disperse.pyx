@@ -23,17 +23,23 @@ cdef extern from "math.h":
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.embedsignature(True)
-def disperse_grism_object(np.ndarray[DTYPE_t, ndim=2] flam, np.ndarray[SEGM_t, ndim=2] segm, int seg_id, np.ndarray[LINT_t, ndim=1] idxl, np.ndarray[DTYPE_t, ndim=1] yfrac, np.ndarray[DTYPE_t, ndim=1] ysens, np.ndarray[DTYPE_t, ndim=1] full, np.ndarray[LINT_t, ndim=1] x0, np.ndarray[LINT_t, ndim=1] shd, np.ndarray[LINT_t, ndim=1] shg):
+def disperse_grism_object(np.ndarray[DTYPE_t, ndim=2] flam, np.ndarray[SEGM_t, ndim=2] segm, int seg_id, np.ndarray[LINT_t, ndim=1] idxl, np.ndarray[DTYPE_t, ndim=1] yfrac, np.ndarray[DTYPE_t, ndim=1] ysens, np.ndarray[DTYPE_t, ndim=1] full, np.ndarray[LINT_t, ndim=1] x0, np.ndarray[LINT_t, ndim=1] shd, np.ndarray[LINT_t, ndim=1] sh_thumb, np.ndarray[LINT_t, ndim=1] shg):
 
     cdef int i,j,k1,k2
-    cdef unsigned int nk,nl,k
+    cdef unsigned int nk,nl,k,shx,shy
     cdef double fl_ij
     
     nk = len(idxl)
     nl = len(full)
     
-    for i in range(0-shd[1], shd[1]):
-        for j in range(0-shd[0], shd[0]):
+    for i in range(0-sh_thumb[1], sh_thumb[1]):
+        if (x0[1]+i < 0) | (x0[1]+i >= shd[1]):
+            continue
+            
+        for j in range(0-sh_thumb[0], sh_thumb[0]):
+            if (x0[0]+j < 0) | (x0[0]+j >= shd[0]):
+                continue
+
             fl_ij = flam[x0[0]+j, x0[1]+i]/1.e-17
             if (fl_ij == 0) | (segm[x0[0]+j, x0[1]+i] != seg_id):
                 continue
