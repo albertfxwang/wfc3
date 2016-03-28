@@ -34,18 +34,24 @@ class GrismFLT(object):
         ...
         
     """
-    def __init__(self, file='ico205lwq_flt.fits', refimage=None, segimage=None, refext=0, verbose=True):
+    def __init__(self, flt_file='ico205lwq_flt.fits', refimage=None, segimage=None, refext=0, verbose=True):
         """
         Todo: pull out stored PyFITS objects to improve pickling
         """
         ### Read the FLT FITS File
-        self.file = file
-        self.im = pyfits.open(self.file)
+        self.flt_file = flt_file
+        self.im = pyfits.open(self.flt_file)
         #self.wcs = pywcs.WCS(self.im['SCI',1].header)
         self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=('SCI',1))
         
-        self.refimage = None
-        self.segimage = None
+        #### Get PA
+        self.get_pa()
+        
+        self.refimage = refimage
+        self.refimage_im = None
+        
+        self.segimage = segimage
+        self.segimage_im = None
         self.seg = np.zeros(self.im[0].shape, dtype=np.float32)
         
         if refimage is None:
@@ -60,19 +66,19 @@ class GrismFLT(object):
         else:
             ### Case where FLT is a grism exposure and reference direct image provided
             if verbose:
-                print 'Blot reference image: %s' %(refimage)
+                print '%s / Blot reference image: %s' %(self.flt_file, refimage)
             
-            self.refimage = pyfits.open(refimage)
-            self.filter = self.refimage[refext].header['FILTER']
+            self.refimage_im = pyfits.open(self.refimage)
+            self.filter = self.refimage_im[refext].header['FILTER']
                             
-            self.flam = self.get_blotted_reference(self.refimage, segmentation=False)*photflam[self.filter]
+            self.flam = self.get_blotted_reference(self.refimage_im, segmentation=False)*photflam[self.filter]
             self.dmask = np.ones((1014,1014), dtype=bool)
         
         if segimage is not None:
             if verbose:
-                print 'Blot segmentation image: %s' %(segimage)
+                print '%s / Blot segmentation image: %s' %(self.flt_file, segimage)
             
-            self.segimage = pyfits.open(segimage)
+            self.segimage_im = pyfits.open(self.segimage)
             self.process_segimage()
                         
         # This needed for the C dispersing function
@@ -114,6 +120,28 @@ class GrismFLT(object):
             #         status = self.compute_model(x=xs, y=ys, sh=[25,25], beam='D')      
             #status = self.compute_model(x=507, y=507, sh=[100,100])
     
+    def clean_for_mp(self):
+        """
+        zero out io.fits objects to make suitable for multiprocessing parallelization
+        """
+        self.im = None
+        self.refimage_im = None
+        self.segimage_im = None
+    
+    def re_init(self):
+        """
+        Open io.fits objects again
+        """
+        self.im = pyfits.open(self.flt_file)
+        if self.refimage:
+            self.refimage_im = pyfits.open(self.refimage)
+        if self.segimage:
+            self.segimage_im = pyfits.open(self.segimage)
+            
+    def get_pa(self):
+        h = self.im['SCI'].header
+        self.pa = 90 - np.arctan2(h['CD2_2'], h['CD2_1'])/np.pi*180
+        
     def unset_dq_bits(self, dq=None, okbits=32+64+512):
         """
         Unset bit flags from a DQ array
@@ -133,10 +161,10 @@ class GrismFLT(object):
         Handle awkward pywcs.all_world2pix for scalar arguments
         """
         if np.isscalar(ra):
-            x, y = self.flt_wcs.all_world2pix([ra], [dec], idx, tolerance=tolerance)
+            x, y = self.flt_wcs.all_world2pix([ra], [dec], idx, tolerance=tolerance, maxiter=100, quiet=True)
             return x[0], y[0]
         else:
-            return self.flt_wcs.all_world2pix(ra, dec, idx, tolerance=tolerance)
+            return self.flt_wcs.all_world2pix(ra, dec, idx, tolerance=tolerance, maxiter=100, quiet=True)
     
     def all_pix2world(self, x, y, idx=1):
         """
@@ -159,13 +187,13 @@ class GrismFLT(object):
         
         tolerance=-4
         xy = None
-        for wcs, wcsname in zip([self.flt_wcs, pywcs.WCS(self.im['SCI'].header)], ['HSTWCS', 'astropy.wcs']):
+        for wcs, wcsname in zip([self.flt_wcs, pywcs.WCS(self.im['SCI'].header, relax=True)], ['HSTWCS', 'astropy.wcs']):
             if xy is not None:
                 break
             for i in range(4):    
                 try:
                     #xy = self.flt_wcs.all_world2pix(catalog_table[ra], catalog_table[dec], 1, tolerance=np.log10(tolerance+i))
-                    xy = wcs.all_world2pix(catalog_table[ra], catalog_table[dec], 1, tolerance=np.log10(tolerance+i))
+                    xy = wcs.all_world2pix(catalog_table[ra], catalog_table[dec], 1, tolerance=np.log10(tolerance+i), quiet=True)
                     break
                 except:
                     print '%s / all_world2pix failed to converge at tolerance = %d' %(wcsname, tolerance+i)
@@ -181,6 +209,11 @@ class GrismFLT(object):
         self.catalog.add_column(Column(name='x_flt', data=xy[0][keep]))
         self.catalog.add_column(Column(name='y_flt', data=xy[1][keep]))
         
+        if sextractor:
+            self.catalog.rename_column('X_WORLD', 'ra')
+            self.catalog.rename_column('Y_WORLD', 'dec')
+            self.catalog.rename_column('NUMBER', 'id')
+            
         return self.catalog
         
         if False:
@@ -205,12 +238,15 @@ class GrismFLT(object):
         n = len(self.catalog)
         for i in range(n):
             ds9.set_region('circle %f %f 2' %(self.catalog['x_flt'][i], self.catalog['y_flt'][i]))
+        
+        if False:
+            ok = catalog_table['MAG_AUTO'] < 23
             
     def process_segimage(self):
         """
         Blot the segmentation image
         """
-        self.seg = self.get_blotted_reference(self.segimage, segmentation=True)
+        self.seg = self.get_blotted_reference(self.segimage_im, segmentation=True)
         
         self.seg_ids = np.cast[int](np.unique(self.seg)[1:])
         self.seg_flux = collections.OrderedDict()
@@ -308,11 +344,17 @@ class GrismFLT(object):
         self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=('SCI',1))
         
         if drizzle_ref:
-            if self.refimage:
-                self.flam = self.get_blotted_reference(self.refimage, segmentation=False)*photflam[self.filter]
+            if (self.refimage) & (self.refimage_im is None):
+                self.refimage_im = pyfits.open(self.refimage)
+                 
+            if self.refimage_im:
+                self.flam = self.get_blotted_reference(self.refimage_im, segmentation=False)*photflam[self.filter]
                 self.clip = np.cast[np.double](self.flam*self.dmask)
             
-            if self.segimage:
+            if (self.segimage) & (self.segimage_im is None):
+                self.segimage_im = pyfits.open(self.segimage)
+            
+            if self.segimage_im:
                 self.process_segimage()
     
     def get_blotted_reference(self, refimage=None, segmentation=False, refext=0):
@@ -380,9 +422,10 @@ class GrismFLT(object):
         import unicorn.utils_c
                  
         xc, yc = int(x), int(y)
+        xcenter = x - xc
         
         ### Get dispersion parameters at the reference position
-        dy, lam = self.conf.get_beam_trace(x=x, y=y, dx=self.conf.dxlam[beam], beam=beam)
+        dy, lam = self.conf.get_beam_trace(x=x, y=y, dx=self.conf.dxlam[beam]+xcenter, beam=beam)
         dyc = np.cast[int](dy)+1
         
         ### Account for pixel centering of the trace
@@ -495,7 +538,7 @@ class BeamCutout(object):
         
         self.cutout_seg = np.zeros(self.shg, dtype=np.float32)
         if segm_flt is not None:
-            self.cutout_seg = self.get_cutout(segm_flt.data)*1
+            self.cutout_seg = self.get_cutout(segm_flt)*1
             
     def init_dispersion(self, xoff=0, yoff=0):
         """
@@ -570,6 +613,8 @@ class BeamCutout(object):
         
         data = hdul = pyfits.HDUList([pyfits.ImageHDU(data=data, header=h)])
         wcs = stwcs.wcsutil.HSTWCS(hdul, ext=0)
+        wcs.pscale = np.sqrt(wcs.wcs.cd[0,0]**2 + wcs.wcs.cd[1,0]**2)*3600.
+        
         return hdul[0], wcs
         
     def align_spectrum(self, xspec=None, yspec=None):

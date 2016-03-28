@@ -95,6 +95,10 @@ class aXeConf():
                     data = np.cast[np.double](self.sens[beam][col])
                     self.sens[beam].remove_column(col)
                     self.sens[beam].add_column(Column(data=data, name=col))
+                
+                ### Scale BEAM F
+                if (beam == 'F') & ('G141' in self.conf_file):
+                    self.sens[beam]['SENSITIVITY'] *= 0.35
                     
                 # wave = np.cast[np.double](self.sens[beam]['WAVELENGTH'])
                 # sens = np.cast[np.double](self.sens[beam]['SENSITIVITY']
