@@ -34,15 +34,26 @@ class GrismFLT(object):
         ...
         
     """
-    def __init__(self, flt_file='ico205lwq_flt.fits', refimage=None, segimage=None, refext=0, verbose=True):
+    def __init__(self, flt_file='ico205lwq_flt.fits', sci_ext=['SCI',1], refimage=None, segimage=None, refext=0, verbose=True, pad=100):
         """
         Todo: pull out stored PyFITS objects to improve pickling
         """
         ### Read the FLT FITS File
         self.flt_file = flt_file
-        self.im = pyfits.open(self.flt_file)
+        self.sci_ext = sci_ext
+        
         #self.wcs = pywcs.WCS(self.im['SCI',1].header)
-        self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=('SCI',1))
+        #self.im = pyfits.open(self.flt_file)
+        self.pad = pad
+        self.read_flt()
+        self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=tuple(sci_ext))
+        
+        self.flt_wcs.naxis1 = self.im_header['NAXIS1']+2*self.pad
+        self.flt_wcs.naxis2 = self.im_header['NAXIS2']+2*self.pad
+        self.flt_wcs.wcs.crpix[0] += self.pad
+        self.flt_wcs.sip.crpix[0] += self.pad
+        self.flt_wcs.wcs.crpix[1] += self.pad
+        self.flt_wcs.sip.crpix[1] += self.pad           
         
         #### Get PA
         self.get_pa()
@@ -52,27 +63,30 @@ class GrismFLT(object):
         
         self.segimage = segimage
         self.segimage_im = None
-        self.seg = np.zeros(self.im[0].shape, dtype=np.float32)
+        self.seg = np.zeros(self.im_data['SCI'].shape, dtype=np.float32)
+        
+        # print 'Break!'
+        # return None
         
         if refimage is None:
             ### Use the FLT image itself
-            self.filter = self.im[0].header['FILTER']
+            self.filter = self.im[0].header['FILTER'].upper()
     
             ### Full science image scaled to F_lambda
-            self.flam = self.im['SCI'].data*self.im[0].header['PHOTFLAM']
+            self.flam = self.im_data['SCI']*self.im_header['PHOTFLAM']
     
             ### xx Use full DQ mask for now
-            self.dmask = self.im['DQ'].data == 0
+            self.dmask = self.im_data['DQ'] == 0
         else:
             ### Case where FLT is a grism exposure and reference direct image provided
             if verbose:
                 print '%s / Blot reference image: %s' %(self.flt_file, refimage)
             
             self.refimage_im = pyfits.open(self.refimage)
-            self.filter = self.refimage_im[refext].header['FILTER']
+            self.filter = self.refimage_im[refext].header['FILTER'].upper()
                             
             self.flam = self.get_blotted_reference(self.refimage_im, segmentation=False)*photflam[self.filter]
-            self.dmask = np.ones((1014,1014), dtype=bool)
+            self.dmask = np.ones(self.flam.shape, dtype=bool)
         
         if segimage is not None:
             if verbose:
@@ -86,7 +100,8 @@ class GrismFLT(object):
         
         ### Read the configuration file.  
         ## xx generalize this to get the grism information from the FLT header
-        self.conf = grism.aXeConf(conf_file='/Users/brammer/3DHST/Spectra/Work/CONF/G141.test41.gbb.conf')
+        self.grism = self.im_header0['FILTER'].upper()
+        self.conf = grism.aXeConf(conf_file='/Users/brammer/3DHST/Spectra/Work/CONF/%s.test41.gbb.conf' %(self.grism))
         
         self.conf.get_beams()
         
@@ -103,9 +118,9 @@ class GrismFLT(object):
         #         self.sens[beam].sens = np.cast[np.double](self.sens[beam]['SENSITIVITY'])
         
         ### full_model is a flattened version of the FLT image
-        self.modelf = np.zeros(1014**2)
-        self.model = self.modelf.reshape((1014,1014))
-        self.idx = np.arange(1014**2).reshape((1014,1014))
+        self.modelf = np.zeros(self.sh_pad[0]*self.sh_pad[1])
+        self.model = self.modelf.reshape(self.sh_pad)
+        self.idx = np.arange(self.modelf.size).reshape(self.sh_pad)
         
         ## Testing
         if True:
@@ -120,6 +135,26 @@ class GrismFLT(object):
             #         status = self.compute_model(x=xs, y=ys, sh=[25,25], beam='D')      
             #status = self.compute_model(x=507, y=507, sh=[100,100])
     
+    def read_flt(self):
+        ### Read extensions of the file, adding padding if necessary
+        self.im = pyfits.open(self.flt_file)
+        self.im_header0 = self.im[0].header.copy()
+        self.im_header = self.im[tuple(self.sci_ext)].header.copy()
+        
+        self.sh_flt = list(self.im[tuple(self.sci_ext)].data.shape)
+        self.sh_pad = [x+2*self.pad for x in self.sh_flt]
+        
+        slx = slice(self.pad, self.pad+self.sh_flt[1])
+        sly = slice(self.pad, self.pad+self.sh_flt[0])
+
+        self.im_data = {}
+        for ext in ['SCI', 'ERR', 'DQ']:
+            iext = (ext, self.sci_ext[1])
+            self.im_data[ext] = np.zeros(self.sh_pad, dtype=self.im[iext].data.dtype)
+            self.im_data[ext][sly, slx] = self.im[iext].data*1
+        
+        self.im_data['DQ'] = self.unset_dq_bits(dq=self.im_data['DQ'], okbits=32+64+512)
+        
     def clean_for_mp(self):
         """
         zero out io.fits objects to make suitable for multiprocessing parallelization
@@ -139,10 +174,10 @@ class GrismFLT(object):
             self.segimage_im = pyfits.open(self.segimage)
             
     def get_pa(self):
-        h = self.im['SCI'].header
+        h = self.im_header
         self.pa = 90 - np.arctan2(h['CD2_2'], h['CD2_1'])/np.pi*180
         
-    def unset_dq_bits(self, dq=None, okbits=32+64+512):
+    def unset_dq_bits(self, dq=None, okbits=32+64+512, verbose=False):
         """
         Unset bit flags from a DQ array
         
@@ -153,9 +188,13 @@ class GrismFLT(object):
         n = len(bin_bits)
         for i in range(n):
             if bin_bits[-(i+1)] == '1':
-                print 2**i
+                if verbose:
+                    print 2**i
+                
                 dq -= (dq & 2**i)
-                   
+        
+        return dq
+        
     def all_world2pix(self, ra, dec, idx=1, tolerance=1.e-4):
         """
         Handle awkward pywcs.all_world2pix for scalar arguments
@@ -187,7 +226,7 @@ class GrismFLT(object):
         
         tolerance=-4
         xy = None
-        for wcs, wcsname in zip([self.flt_wcs, pywcs.WCS(self.im['SCI'].header, relax=True)], ['HSTWCS', 'astropy.wcs']):
+        for wcs, wcsname in zip([self.flt_wcs, pywcs.WCS(self.im_header, relax=True)], ['HSTWCS', 'astropy.wcs']):
             if xy is not None:
                 break
             for i in range(4):    
@@ -198,8 +237,8 @@ class GrismFLT(object):
                 except:
                     print '%s / all_world2pix failed to converge at tolerance = %d' %(wcsname, tolerance+i)
                 
-        sh = self.im['SCI'].data.shape
-        keep = (xy[0] > 0) & (xy[0] < sh[1]) & (xy[1] > 0) & (xy[1] < sh[0])
+        sh = self.im_data['SCI'].shape
+        keep = (xy[0] > 0) & (xy[0] < sh[1]) & (xy[1] > (self.pad-5)) & (xy[1] < (self.pad+self.sh_flt[0]+5))
         self.catalog = catalog_table[keep]
         
         for col in ['x_flt', 'y_flt']:
@@ -337,11 +376,19 @@ class GrismFLT(object):
             self.xsh = xsh
             self.ysh = ysh
             
-        h = self.im['SCI'].header
+        h = self.im_header
         rd = self.all_pix2world([h['CRPIX1'], h['CRPIX1']+xsh], [h['CRPIX2'], h['CRPIX2']+ysh])
         h['CRVAL1'] = rd[0][1]
         h['CRVAL2'] = rd[1][1]
-        self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=('SCI',1))
+        self.im[tuple(self.sci_ext)].header = h
+        self.flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=tuple(self.sci_ext))
+        
+        self.flt_wcs.naxis1 = self.im[sci_ext].header['NAXIS1']+2*self.pad
+        self.flt_wcs.naxis2 = self.im[sci_ext].header['NAXIS2']+2*self.pad
+        self.flt_wcs.wcs.crpix[0] += self.pad
+        self.flt_wcs.sip.crpix[0] += self.pad
+        self.flt_wcs.wcs.crpix[1] += self.pad
+        self.flt_wcs.sip.crpix[1] += self.pad           
         
         if drizzle_ref:
             if (self.refimage) & (self.refimage_im is None):
@@ -375,9 +422,11 @@ class GrismFLT(object):
             
         if segmentation:
             ## todo: allow getting these from cached outputs for cases of very large mosaics            
-            if not hasattr(self, 'seg_ones'):
-                self.seg_ones = np.cast[np.float32](refdata > 0)-1
-            
+            seg_ones = np.cast[np.float32](refdata > 0)-1
+        
+        # refdata = np.ones(refdata.shape, dtype=np.float32)
+        # seg_ones = refdata
+        
         #ref_wcs = astropy.wcs.WCS(refimage[refext].header)
         ref_wcs = stwcs.wcsutil.HSTWCS(refimage, ext=refext)
         #flt_wcs = stwcs.wcsutil.HSTWCS(self.im, ext=('SCI',1))
@@ -389,13 +438,22 @@ class GrismFLT(object):
                     wcs.idcscale = np.sqrt(np.sum(wcs.wcs.cd[0,:]**2))*3600.
             else:
                 wcs.idcscale = np.sqrt(np.sum(wcs.wcs.cd[0,:]**2))*3600.
-                
+            
+            wcs.pscale = np.sqrt(wcs.wcs.cd[0,0]**2 + wcs.wcs.cd[1,0]**2)*3600.
+            
+            #print 'IDCSCALE: %.3f' %(wcs.idcscale)
+            
         #print refimage.filename(), ref_wcs.idcscale, ref_wcs.wcs.cd, flt_wcs.idcscale, ref_wcs.orientat
-                
+            
         if segmentation:
+            #print '\nSEGMENTATION\n\n',(seg_ones+1).dtype, refdata.dtype, ref_wcs, flt_wcs
             ### +1 here is a hack for some memory issues
-            blotted_ones = astrodrizzle.ablot.do_blot(self.seg_ones+1, ref_wcs, flt_wcs, 1, coeffs=True, interp='nearest', sinscl=1.0, stepsize=10, wcsmap=None)
-            blotted_seg = astrodrizzle.ablot.do_blot(refdata, ref_wcs, flt_wcs, 1, coeffs=True, interp='nearest', sinscl=1.0, stepsize=10, wcsmap=None)
+            blotted_seg = astrodrizzle.ablot.do_blot(refdata+0, ref_wcs, flt_wcs, 1, coeffs=True, interp='nearest', sinscl=1.0, stepsize=1, wcsmap=None)
+            blotted_ones = astrodrizzle.ablot.do_blot(seg_ones+1, ref_wcs, flt_wcs, 1, coeffs=True, interp='nearest', sinscl=1.0, stepsize=1, wcsmap=None)
+            
+            #blotted_seg = astrodrizzle.ablot.do_blot(refdata+0, ref_wcs, flt_wcs, 1, coeffs=True, interp='poly5', sinscl=1.0, stepsize=10, wcsmap=None)
+            #blotted_seg = astrodrizzle.ablot.do_blot(refdata, ref_wcs, flt_wcs, 1, coeffs=True, interp='poly5', sinscl=1.0, stepsize=10, wcsmap=None)
+            #blotted_ones = blotted_seg
             
             blotted_ones[blotted_ones == 0] = 1
             ratio = np.round(blotted_seg/blotted_ones)
@@ -404,6 +462,7 @@ class GrismFLT(object):
             blotted = ratio
             
         else:
+            #print '\nREFDATA\n\n', refdata.dtype, ref_wcs, flt_wcs
             blotted = astrodrizzle.ablot.do_blot(refdata, ref_wcs, flt_wcs, 1, coeffs=True, interp='poly5', sinscl=1.0, stepsize=10, wcsmap=None)
         
         return blotted
@@ -425,7 +484,7 @@ class GrismFLT(object):
         xcenter = x - xc
         
         ### Get dispersion parameters at the reference position
-        dy, lam = self.conf.get_beam_trace(x=x, y=y, dx=self.conf.dxlam[beam]+xcenter, beam=beam)
+        dy, lam = self.conf.get_beam_trace(x=x-self.pad, y=y-self.pad, dx=self.conf.dxlam[beam]+xcenter, beam=beam)
         dyc = np.cast[int](dy)+1
         
         ### Account for pixel centering of the trace
@@ -440,7 +499,7 @@ class GrismFLT(object):
             
         x0 = np.array([yc, xc])
         slx = self.conf.dxlam[beam]+xc
-        ok = (slx < 1014) & (slx > 0)
+        ok = (slx < self.sh_pad[1]) & (slx > 0)
         
         if in_place:
             #self.modelf *= 0
@@ -461,7 +520,9 @@ class GrismFLT(object):
         ### Loop over pixels in the direct FLT and add them into a final 2D spectrum (in the full (flattened) FLT frame)
         ## need better handling of segmentation images
         ## big problem:  adds into the output array, initializing full array to zero would be very slow
-        status = disperse.disperse_grism_object(self.clip, self.seg, id, idxl, yfrac[ok], ysens[ok], outdata, x0, np.array(self.clip.shape), np.array(sh), np.array((1014,1014)))
+        status = disperse.disperse_grism_object(self.clip, self.seg, id, idxl, yfrac[ok], ysens[ok], outdata, x0, np.array(self.clip.shape), np.array(sh), np.array(self.sh_pad))
+        
+        #outdata = outdata[:,:self.shg[1]]
         
         if not in_place:
             return outdata
@@ -496,7 +557,7 @@ class BeamCutout(object):
     """
     Cutout 2D spectrum from the full frame
     """
-    def __init__(self, x=588.28, y=40.54, conf=None, cutout_dimensions=[10,10], beam='A', direct_flam=None, grism_flt=None, segm_flt=None):                 
+    def __init__(self, x=588.28, y=40.54, conf=None, cutout_dimensions=[10,10], beam='A', GrismFLT=None): #direct_flam=None, grism_flt=None, segm_flt=None):                 
         import unicorn.utils_c
         
         self.beam = beam
@@ -505,6 +566,11 @@ class BeamCutout(object):
         
         self.xcenter = self.x-self.xc
         
+        if GrismFLT is not None:
+            self.pad = GrismFLT.pad
+        else:
+            self.pad = 0
+            
         self.dx = conf.dxlam[beam]
         
         self.cutout_dimensions = cutout_dimensions
@@ -524,21 +590,31 @@ class BeamCutout(object):
         self.init_dispersion()
         
         self.thumb = None
-        if direct_flam is not None:
-            self.thumb = self.get_flam_thumb(direct_flam)
-        
         self.cutout_sci = None    
         self.shc = None
-        if grism_flt is not None:
-            self.cutout_sci = self.get_cutout(grism_flt['SCI'].data)*1
-            self.cutout_dq = self.get_cutout(grism_flt['DQ'].data)*1
-            self.cutout_err = self.get_cutout(grism_flt['ERR'].data)*1
+        self.cutout_seg = np.zeros(self.shg, dtype=np.float32)
+
+        if GrismFLT is not None:
+            self.thumb = self.get_flam_thumb(GrismFLT.flam)
+            self.cutout_sci = self.get_cutout(GrismFLT.im_data['SCI'])*1
+            self.cutout_dq = self.get_cutout(GrismFLT.im_data['DQ'])*1
+            self.cutout_err = self.get_cutout(GrismFLT.im_data['ERR'])*1
             self.shc = self.cutout_sci.shape
+            
+            self.cutout_seg = self.get_cutout(GrismFLT.seg)*1
+            
+        # if direct_flam is not None:
+        #     self.thumb = self.get_flam_thumb(direct_flam)
+        # 
+        # if grism_flt is not None:
+        #     self.cutout_sci = self.get_cutout(grism_flt['SCI'].data)*1
+        #     self.cutout_dq = self.get_cutout(grism_flt['DQ'].data)*1
+        #     self.cutout_err = self.get_cutout(grism_flt['ERR'].data)*1
+        #     self.shc = self.cutout_sci.shape
             #beam.cutout[beam.cutout_dq > 0] = 0
         
-        self.cutout_seg = np.zeros(self.shg, dtype=np.float32)
-        if segm_flt is not None:
-            self.cutout_seg = self.get_cutout(segm_flt)*1
+        #if segm_flt is not None:
+         #   self.cutout_seg = self.get_cutout(segm_flt)*1
             
     def init_dispersion(self, xoff=0, yoff=0):
         """
@@ -546,7 +622,7 @@ class BeamCutout(object):
         """
         import unicorn.utils_c
         
-        self.dy, self.lam = self.conf.get_beam_trace(x=self.x-xoff, y=self.y+yoff, dx=self.conf.dxlam[self.beam]+self.xcenter-xoff, beam=self.beam)
+        self.dy, self.lam = self.conf.get_beam_trace(x=self.x-xoff-self.pad, y=self.y+yoff-self.pad, dx=self.conf.dxlam[self.beam]+self.xcenter-xoff, beam=self.beam)
         
         self.dy += yoff
         
@@ -598,8 +674,8 @@ class BeamCutout(object):
     def make_wcs_header(self, data=None):
         import stwcs
         h = pyfits.Header()
-        h['CRPIX1'] = self.cutout_dimensions[1]
-        h['CRPIX2'] = self.cutout_dimensions[0]
+        h['CRPIX1'] = self.cutout_dimensions[1]#+0.5
+        h['CRPIX2'] = self.cutout_dimensions[0]#+0.5
         h['CRVAL1'] = self.lam[0]        
         h['CD1_1'] = self.lam[1]-self.lam[0]
         h['CD1_2'] = 0.

@@ -24,24 +24,46 @@ FLTs = None
 def go():
     
     import os
+    import glob
     import mywfc3.flt.multifit
     reload(mywfc3.grism); reload(mywfc3.flt.model); reload(mywfc3.flt.test_parallel); reload(mywfc3.flt.multifit)
+    import threedhst.dq
     
     ds9 = threedhst.dq.myDS9()
     
-    os.chdir('/Users/brammer/3DHST/Spectra/Work/Erb/REDO_v2')
-    files = ['ibr903dyq_flt.fits', 'ibr903e1q_flt.fits', 'ibr918e9q_flt.fits', 'ibr918ebq_flt.fits']
-    self = mywfc3.flt.multifit.GroupFLT(files, refimage='Q0142-10-F140W_drz_sci.fits', segimage='Q0142-10-F140W_seg.fits', master_cat='Q0142-10-F140W.cat')
-    
+    #### Q0142
+    # os.chdir('/Users/brammer/3DHST/Spectra/Work/Erb/REDO_v2')
+    # files = ['ibr903dyq_flt.fits', 'ibr903e1q_flt.fits', 'ibr918e9q_flt.fits', 'ibr918ebq_flt.fits']
+    # self = mywfc3.flt.multifit.GroupFLT(files, refimage='Q0142-10-F140W_drz_sci.fits', segimage='Q0142-10-F140W_seg.fits', master_cat='Q0142-10-F140W.cat')
+    # 
+    #### GOODS-N
     os.chdir('/Users/brammer/3DHST/Spectra/Work/Oesch/TestFLT')
     files=glob.glob('*flt.fits')[:4]
     files.extend(glob.glob('*flt.fits')[12:16])
+    #files=glob.glob('*flt.fits')
     
-    files=glob.glob('*flt.fits')
+    # self0 = mywfc3.flt.model.GrismFLT(flt_file=files[0], refimage='F160W_mosaic.fits', segimage='F160W_seg.fits', pad=0)
+    # self100 = mywfc3.flt.model.GrismFLT(flt_file=files[0], refimage='F160W_mosaic.fits', segimage='F160W_seg.fits', pad=100)
+    # refimage='F160W_mosaic.fits'; segimage='F160W_seg.fits'
     
-    self = mywfc3.flt.multifit.GroupFLT(files, refimage='F160W_mosaic.fits', segimage='F160W_seg.fits', master_cat='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-N_IR.cat')
+    #self = mywfc3.flt.multifit.GroupFLT(files, refimage='F160W_mosaic.fits', segimage='F160W_seg.fits', master_cat='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-N_IR.cat', pad=200)
+    self = mywfc3.flt.multifit.GroupFLT(files, refimage='F160W_mosaic.fits', segimage='F160W_seg_blot.fits', master_cat='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-N_IR.cat', pad=150)
     
-    self.mp_compute_models(self.fit_data, initialize=True, verbose=1)
+    #### UDF
+    # os.chdir('/Users/brammer/3DHST/Spectra/Work/UDF_FLT')
+    # files=glob.glob('ibhj3*flt.fits')[:4]
+    # files=glob.glob('icoi1ag*flt.fits')
+    # 
+    # f = mywfc3.flt.model.GrismFLT(flt_file='icoi1ag2q_flt.fits', refimage='/Users/brammer/3DHST/Ancillary/UDF/XDF/hlsp_xdf_hst_wfc3ir-60mas_hudf_f105w_v1_drz.fits', segimage='GOODS-S_IR.sub.seg.fits', pad=100)
+    # 
+    # #files.extend(glob.glob('*flt.fits')[12:16])
+    # #files=glob.glob('*flt.fits')
+    # self = mywfc3.flt.multifit.GroupFLT(files, refimage='/Users/brammer/3DHST/Ancillary/UDF/XDF/hlsp_xdf_hst_wfc3ir-60mas_hudf_f105w_v1_drz.fits', segimage='GOODS-S_IR.sub.seg.fits', master_cat='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-S_IR.cat')
+    # 
+    # ### G102
+    # self.init_fit_data(maglim={'A':25,'B':24,'C':22,'D':21,'E':21,'F':-100})
+    
+    self.mp_compute_models(self.fit_data, initialize=True, verbose=1, parallel=True)
     print self.dt
     
     ### Testing
@@ -50,44 +72,131 @@ def go():
     dz = 0.003
     zr = [0.4, 3.5]
     
+    ###
+    import unicorn
+    c, z, f = unicorn.analysis.read_catalogs('goodsn')
+    c, z, f = unicorn.analysis.read_catalogs('goodss')
+    cat_zsp_ids = c['id'][(z['z_spec'] > 0.7) & (z['z_spec'] < 2.3)]
+    ids = []
+    z_spec = []
+    for id in self.FLTs[0].catalog['id']:
+        if id in cat_zsp_ids:
+            ids.append(id)
+            z_spec.append(z['z_spec'][z['id'] == id][0])
+            
     cutout_dimensions=[10,10]
 
-    beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=ds9)
+    beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
     mb = mywfc3.flt.multifit.MultiBeam(beams)
     
-    refh, refwcs = mb.get_drizzle_wcs(center_wave=14000.0, dlam=46, NX=100, spatial_scale=1, NY=cutout_dimensions[0])
-    refh['CRPIX2'] -= 2
+    #refh, refwcs = mb.get_drizzle_wcs(center_wave=14000.0, dlam=46, NX=100, spatial_scale=1, NY=cutout_dimensions[0])
+    #refh['CRPIX2'] -= 2
 
     ref, refwcs = mb.beams[0].make_wcs_header(mb.beams[0].model)
     refh = ref.header
     #refh['CRVAL2'] *= 2# 1
     #refh['CD2_1'] = 0
     
-    header, sci, wht, ctx = mb.drizzle(beam_attr='cutout_sci', pixfrac=0.3, ref_header=refh)
-    header, contam, wht, ctx = mb.drizzle(beam_attr='contam', pixfrac=0.3, ref_header=refh)
+    header, sci, wht, ctx = mb.drizzle(beam_attr='cutout_sci', pixfrac=0.3, ref_header=refh, ds9=None)
+    header, contam, wht, ctx = mb.drizzle(beam_attr='contam', pixfrac=0.3, ref_header=refh, ds9=None)
+    ds9.view(sci-contam)
     
     driz_beam = copy.copy(mb.beams[0])
-    driz_beam.clean = (sci-contam).flatten()
+    driz_beam.clean = np.roll(sci-contam, -1, axis=1)
+    driz_beam.cleanf = driz_beam.clean.flatten()
+    driz_beam.thumb *= 0.
+    for ib, beam in enumerate(beams):
+        driz_beam.thumb += mb.beams[ib].thumb/len(beams)
+        
     #driz_beam.cleanf = (sci-contam).flatten()
-    driz_beam.ivar = wht
+    driz_beam.ivar = np.roll(wht, -1, axis=1).flatten()
     mbd = mywfc3.flt.multifit.MultiBeam([driz_beam])
     
     zgrid, lnp, coeffs = mbd.fit_grid(zr=zr, dz=dz)
-    plt.plot(zgrid, lnp-lnp.max())
-        
-    out = mb.fit_at_z(z=zgrid[np.argmax(lnp)], get_fit=True)
+    z_gris, lnp_max = get_parabola_max(zgrid, lnp)
+    plt.plot(zgrid, lnp-lnp_max)
+    plt.scatter(z_gris, 0, color='k')
+    
+    print 'dz/(1+z): %.4f' %((z_gris-zsp)/(1+zsp))
+    plt.plot(zsp*np.ones(2), [(lnp-lnp.max()).min(), 0], color='k')
+    
+    out, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
+    xfit, yfit = mb.get_1d_spec(coeff, z_gris)
+    #self.update_model(id, xspec=xfit, yspec=yfit)
+    
     mb.reshape_modelfit(out, attr='modelfit')
     #refh['CRPIX2'] += 0.1
     header, msci, mwht, mctx = mb.drizzle(beam_attr='modelfit', pixfrac=0.3, ref_header=refh)
     #plt.imshow(msci, interpolation='Nearest', vmin=-0.02, vmax=0.4)
+
+def maxwcs_cutout(files, refimage=None, output='subimg.fits', segmentation=False):
+    """
+    Create a cutout image that encompases a list of input images
+    """
+    import stwcs
+    #self = mywfc3.flt.multifit.GroupFLT(files, refimage='F160W_mosaic.fits', segimage='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/goodsn_3dhst.v4.0.F160W_seg.fits', master_cat='/Users/brammer/3DHST/Spectra/Work/3DHST_Detection/GOODS-N_IR.cat', pad=200
+    
+    import astropy.wcs as pywcs
+    list_of_wcsobj = []
+    for file in files:
+        im = pyfits.open(file)
+        list_of_wcsobj.append(pywcs.WCS(im['SCI',1].header))
         
-def _loadFLT(file, refimage, segimage, cat):
+    imref = pyfits.open(refimage)
+    ref_wcs = pywcs.WCS(imref[0].header)
+        
+    out_wcs = stwcs.distortion.utils.output_wcs(list_of_wcsobj, ref_wcs=None, owcs=None, undistort=True)
+    
+    for wcs in [ref_wcs, out_wcs]:
+        wcs.pscale = np.sqrt(wcs.wcs.cd[0,0]**2 + wcs.wcs.cd[1,0]**2)*3600.
+
+    map = astrodrizzle.ablot.wcs_functions.WCSMap(ref_wcs, out_wcs)
+    px = np.array([0,1,1,0])*out_wcs._naxis1
+    py = np.array([0,0,1,1])*out_wcs._naxis2
+
+    pad = 200
+    px += (px > 0)*pad - (px == 0)*pad
+    py += (py > 0)*pad - (py == 0)*pad
+    ppx, ppy = np.cast[int](map.backward(px, py))
+    
+    slx = slice(ppx.min(), ppx.max())
+    sly = slice(ppy.min(), ppy.max())
+    
+    subim = imref[0].data[sly, slx]
+    sub_wcs = ref_wcs.slice((sly, slx))
+    subh = sub_wcs.to_header()
+    
+    for i in range(2):
+        for j in range(2):
+            pc = 'PC%d_%d' %(i+1, j+1)
+            cd = 'CD%d_%d' %(i+1, j+1)
+            if pc in subh:
+                subh[cd] = subh[pc]
+                subh.remove(pc)
+            else:
+                subh[cd] = 0
+    
+    pyfits.writeto(output, data=subim, header=subh, clobber=True)
+        
+def get_parabola_max(x, y):
+    from astropy.modeling import models, fitting
+    
+    fit = fitting.LinearLSQFitter()
+
+    ix = np.argmax(y)
+    p2 = models.Polynomial1D(degree=2)
+    px = fit(p2, x[ix-1:ix+2], y[ix-1:ix+2]/y.max())
+    dx = -px.parameters[1]/(2*px.parameters[2])
+    return dx, px(dx)*y.max()
+    
+    
+def _loadFLT(file, refimage, segimage, pad, cat):
     import mywfc3.flt.model
     
     if os.path.exists('%s.npy' %(file)):
         flt = np.load('%s.npy' %(file))[0]
     else:
-        flt = mywfc3.flt.model.GrismFLT(flt_file=file, refimage=refimage, segimage=segimage)
+        flt = mywfc3.flt.model.GrismFLT(flt_file=file, refimage=refimage, segimage=segimage, pad=pad)
         # xspec = np.arange(1.e4,1.8e4)
         # yspec = (xspec/1.6e4)**-0.4
         # xsh, ysh, x_rms, y_rms = flt.align_bright_objects(xspec=xspec, yspec=yspec, ds9=ds9)
@@ -100,7 +209,7 @@ def _loadFLT(file, refimage, segimage, cat):
     return flt
         
 class GroupFLT():
-    def __init__(self, files=[], refimage='Q0142-10-F140W_drz_sci.fits', segimage='Q0142-10-F140W_seg.fits', master_cat='Q0142-10-F140W.cat'):
+    def __init__(self, files=[], refimage='Q0142-10-F140W_drz_sci.fits', segimage='Q0142-10-F140W_seg.fits', master_cat='Q0142-10-F140W.cat', pad=100):
         import multiprocessing as mp
         
         global FLTs
@@ -111,6 +220,7 @@ class GroupFLT():
         
         self.refimage = refimage
         self.segimage = segimage
+        self.pad = pad
         
         self.cat = catIO.Table(master_cat)
         self.cat.rename_column('X_WORLD', 'ra')
@@ -148,7 +258,7 @@ class GroupFLT():
             t0_pool = time.time()
             pool = mp.Pool(processes=mp.cpu_count())
     
-            results = [pool.apply_async(_loadFLT, (self.files[i], self.refimage, self.segimage, self.cat)) for i in xrange(self.N)]
+            results = [pool.apply_async(_loadFLT, (self.files[i], self.refimage, self.segimage, self.pad, self.cat)) for i in xrange(self.N)]
             pool.close()
             pool.join()
         
@@ -159,7 +269,7 @@ class GroupFLT():
             t1_pool = time.time()
         else:
             for i in xrange(self.N):
-                flt_i = _loadFLT(self.files[i], self.refimage, self.segimage, self.cat)
+                flt_i = _loadFLT(self.files[i], self.refimage, self.segimage, self.pad, self.cat)
                 FLTs.append(flt_i)
         
         ### Need to re-open the FLT files.  Don't bother with refimage/segimage 
@@ -170,7 +280,7 @@ class GroupFLT():
             
     def init_fit_data(self, xspec=None, yspec=None, maglim={'A':25,'B':24,'C':22,'D':21,'E':21,'F':21}):
         if xspec is None:
-            xspec = np.arange(9000,1.8e4,5)
+            xspec = np.arange(7000,1.8e4,5)
         
         if yspec is None:
             yspec = (xspec/1.4e4)**-1 #-0.2
@@ -205,8 +315,16 @@ class GroupFLT():
             ix = flt.catalog['id'] == id
             xi = flt.catalog['x_flt'][ix][0]
             yi = flt.catalog['y_flt'][ix][0]
-        
-            beam = mywfc3.flt.model.BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam='A', conf=flt.conf, direct_flam=flt.flam, grism_flt=flt.im)
+            
+            
+            if (yi < flt.pad) | (yi > flt.sh_flt[0]+flt.pad) | (xi < cutout_dimensions[1]) | (xi > flt.sh_pad[1]-cutout_dimensions[1]):
+                #print 'Skip:', xi, yi
+                continue
+            else:
+                pass
+                #print xi, yi
+            
+            beam = mywfc3.flt.model.BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam='A', conf=flt.conf, GrismFLT=flt) #direct_flam=flt.flam, grism_flt=flt.im)
             beam.cutout_seg = np.cast[np.float32](beam.get_flam_thumb(flt.seg))
             beam.id = id
             
@@ -364,7 +482,7 @@ class GroupFLT():
             for res in results:
                 i, modelf = res.get(timeout=1)
                 self.FLTs[i].modelf = modelf
-                self.FLTs[i].model = self.FLTs[i].modelf.reshape((1014,1014))
+                self.FLTs[i].model = self.FLTs[i].modelf.reshape(self.FLTs[i].sh_pad)
                 #print FLTs[key].modelf.max()
 
             t1_pool = time.time()
@@ -376,16 +494,133 @@ class GroupFLT():
             t1_pool = time.time()
                 
         self.dt = t1_pool - t0_pool
+    
+    def refine_model(self, maglim=23, ds9=None):
+        """
+        Update the parent contamination model based on a simple continuum
+        fit to the bright objects in the catalog
+        """
+        keep = self.FLTs[0].catalog['MAG_AUTO'] < maglim
+        bright_ids = self.FLTs[0].catalog['id'][keep]            
+        so = np.argsort(self.FLTs[0].catalog['MAG_AUTO'][keep])
+        
+        cutout_dimensions=[10,10]
+        
+        for ii, id in enumerate(bright_ids[so]):
+            try:
+                beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
+                mb = mywfc3.flt.multifit.MultiBeam(beams)
+            except:
+                continue
+            
+            ### zero out emission line templates
+            mb.A[:,2:] *= 0.
+            mb.line_template_hi[1]*=0
+            mb.line_template_lo[1]*=0 
+            
+            z = 0
+            
+            out, coeff = mb.fit_at_z(z=z, get_fit=True)
+            xfit, yfit = mb.get_spec(coeff, z)
+            self.update_model(id, xspec=xfit, yspec=yfit)
+            
+            print 'Refine: %d %d' %(ii, id)
+            if ds9 is not None:
+                ds9.view(self.FLTs[0].im_data['SCI']-self.FLTs[0].model)
+    
+    def extract_and_fit(self, id=18629, zr=[0.68,2.4], dz=0.003, cutout_dimensions=[14,14], ds9=None, update_model=True, zsp=None):
+        import copy
+        
+        ### Extract 
+        beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=ds9)
+        mb = MultiBeam(beams)
+        
+        ### use trace geometry of the first beam
+        ref, refwcs = mb.beams[0].make_wcs_header(mb.beams[0].model)
+        refh = ref.header
+        
+        ## straighten trace
+        #refh['CD2_1'] = 0
+        
+        ### drizzle all beams to trace of first beam
+        header, sci, wht, ctx = mb.drizzle(beam_attr='cutout_sci', pixfrac=0.3, ref_header=refh, ds9=ds9)
+        header, contam, wht, ctx = mb.drizzle(beam_attr='contam', pixfrac=0.3, ref_header=refh, ds9=None)
+        if ds9 is not None:
+            ds9.view(sci-contam)
+        
+        ## Make replacement MultiBeam list with just the drizzled beam
+        driz_beam = copy.copy(mb.beams[0])
+        driz_beam.clean = np.roll(sci-contam, -1, axis=1)
+        driz_beam.cleanf = driz_beam.clean.flatten()
+        driz_beam.thumb *= 0.
+        for ib, beam in enumerate(beams):
+            driz_beam.thumb += mb.beams[ib].thumb/len(beams)
 
+        driz_beam.ivar = np.roll(wht, -1, axis=1).flatten()
+        mbd = mywfc3.flt.multifit.MultiBeam([driz_beam])
+
+        ## Fit the redshift
+        zgrid, lnp, coeffs = mbd.fit_grid(zr=zr, dz=dz)
+        z_gris, lnp_max = get_parabola_max(zgrid, lnp)
+        
+        plt.plot(zgrid, lnp-lnp_max)
+        plt.scatter(z_gris, 0, color='k')
+
+        if zsp is not None:
+            print 'dz/(1+z): %.4f' %((z_gris-zsp)/(1+zsp))
+            plt.plot(zsp*np.ones(2), [(lnp-lnp.max()).min(), 0], color='k')
+        
+        ### Get the best-fit spectrum
+        out, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
+        xfit, yfit = mb.get_1d_spec(coeff, z_gris)
+
+        mb.reshape_modelfit(out, attr='modelfit')
+        header, msci, mwht, mctx = mb.drizzle(beam_attr='modelfit', pixfrac=0.3, ref_header=refh)
+        
+        if update_model:
+            self.update_model(id, xspec=xfit, yspec=yfit)
+                
+    def fit_multiple(self, ids=[]):
+        import multiprocessing as mp
+        
+        t0_pool = time.time()
+        pool = mp.Pool(processes=mp.cpu_count())
+
+        results = [pool.apply_async(func_fit, (self, id)) for id in ids]
+        pool.close()
+        pool.join()
+    
+        for res in results:
+            status = res.get(timeout=1)
+        
+        t1_pool = time.time()
+        
+def func_fit(self, id):
+    self.extract_and_fit(id=id)
+    return 1
+    
+        
+    
 class MultiBeam(object):
     def __init__(self, beams=[], model_min=0.05, ivar_min=[0.05,97]):
         self.beams = beams
         
-        self.line_template_hi = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt', unpack=True)
+        #self.line_template_hi = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt', unpack=True)
+        #np.save(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy', [self.line_template_hi])
+        self.line_template_hi = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy')[0]
         
         #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.loOIII.txt', unpack=True)
-        self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.txt', unpack=True)
+        #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.m.txt', unpack=True)
+        #np.save(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.emline.m.txt.npy', [self.line_template_lo])
+        self.line_template_lo = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.emline.m.txt.npy')[0]
         
+        #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/cvd12_t11_solar_Chabrier.extend.m.dat', unpack=True)
+        
+        ### Make templates with identical dimensions
+        if False:
+            yt = unicorn.utils_c.interp_conserve_c(self.line_template_hi[0], self.line_template_lo[0], self.line_template_lo[1])
+            np.savetxt(os.getenv('THREEDHST')+'/templates/cvd12_t11_solar_Chabrier.extend.m.dat', np.array([self.line_template_hi[0], yt]).T, fmt='%.6e')
+            
         #### Initialize multifit arrays
         A = None
         y = None
@@ -400,13 +635,13 @@ class MultiBeam(object):
             
             if A is None:
                 A = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0., beam.cmodel*0., np.ones(beam.cmodel.size)]).T
-                y = beam.clean*1
+                y = beam.cleanf*1
                 mask = maski
                 ivar = beam.ivar.flatten()
             else:
                 Ap = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0, beam.cmodel*0., np.ones(beam.cmodel.size)]).T
                 A = np.append(A, Ap, axis=0)
-                y = np.append(y, beam.clean*1)
+                y = np.append(y, beam.cleanf*1)
                 mask = np.append(mask, maski)
                 ivar = np.append(ivar, beam.ivar.flatten())
         
@@ -444,11 +679,18 @@ class MultiBeam(object):
         
         out = np.dot(Ap, clf.coef_)
         if get_fit:
-            return out
+            return out, clf.coef_
             
         lnp = -0.5*np.sum((out-self.y)[self.mask]**2*self.ivar[self.mask])
         
         return lnp, clf.coef_
+    
+    def get_1d_spec(self, coeff, z):
+        beam = self.beams[0]
+        xpix = (self.line_template_hi[0]*(1+z) - beam.lam[0])/(beam.lam[1]-beam.lam[0])/100.
+        yspec = (coeff[0]*xpix+coeff[1]) + self.line_template_hi[1]*coeff[2] + self.line_template_lo[1]*coeff[3]
+        
+        return self.line_template_hi[0]*(1+z), yspec
     
     def reshape_modelfit(self, out, attr='modelfit'):
         i0 = 0
@@ -457,7 +699,6 @@ class MultiBeam(object):
             beam.__setattr__(attr, out[i0:i0+i1].reshape(beam.shg))
             i0 += i1
             
-        
     def fit_grid(self, zr=[0.7, 3.4], dz=0.01):
         """
         """
@@ -531,6 +772,8 @@ class MultiBeam(object):
         outsci[outwht == 0] = 0
         return ref_header, outsci, outwht, outctx
         
+        ########### DOne
+        
         ##### optimal extractions
         wave = (np.arange(h['NAXIS1'])-h['CRPIX1'])*h['CD1_1'] + h['CRVAL1']
         spec = outsci.sum(axis=0)
@@ -587,7 +830,7 @@ class MultiBeam(object):
             for beam in beams:
                 beam.compute_model(beam.thumb, id=id, xspec=self.fit_data[id]['xspec'], yspec=self.fit_data[id]['yspec'])    
                 beam.bg = clf.coef_[3]
-    
+                    
 def _FLT_compute_model(ii, fit_data={}, initialize=True, verbose=True):
     import multiprocessing as mp
     #import multiprocessing.queues
@@ -607,7 +850,7 @@ def _FLT_compute_model(ii, fit_data={}, initialize=True, verbose=True):
     for i, id in enumerate(keys):
         if fit_data[id] is not None:
             if id in flt.catalog['id']:
-                ix = flt.catalog['id'] == id
+                ix = flt.catalog['id'] == id                    
                 for beam in fit_data[id]['beams']:
                     if verbose > 1:
                         print '%d %d %s id=%d mag=%.2f' %(ii, i+1, beam, id, fit_data[id]['mag'])
