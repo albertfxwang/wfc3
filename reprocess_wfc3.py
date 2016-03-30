@@ -389,12 +389,46 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     if remove_ima:
         os.remove(raw.replace('raw', 'ima'))
 
+def reprocess_parallel(files):
+    """
+    """
+    
+    import multiprocessing as mp
+    import time
+    
+    t0_pool = time.time()
+    pool = mp.Pool(processes=mp.cpu_count())
+
+    results = [pool.apply_async(make_IMA_FLT, (file, [], True, True, True, [[300,700],[300,700]])) for file in files]
+    pool.close()
+    pool.join()
+
+    t1_pool = time.time()
+    
+def show_ramps_parallel(files):
+    """
+    """
+    
+    import multiprocessing as mp
+    import time
+    
+    t0_pool = time.time()
+    pool = mp.Pool(processes=mp.cpu_count())
+
+    results = [pool.apply_async(show_MultiAccum_reads, (file, False, False, [[300,700],[300,700]])) for file in files]
+    pool.close()
+    pool.join()
+
+    t1_pool = time.time()
+    
 def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=True, stats_region=[[0,1014], [0,1014]]):
     """
     Make a figure (.ramp.png) showing the individual reads of an 
     IMA or RAW file.
     """    
     import scipy.ndimage as nd
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
     
     if verbose:
         logger.setLevel(logging.DEBUG)
@@ -447,7 +481,8 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
     logger.info('Make plot')
     
     plt.ioff()
-    fig = plt.figure(figsize=[10,10])
+    #fig = plt.figure(figsize=[10,10])
+    fig = Figure(figsize=[10,10])
 
     ## Smoothing
     smooth = 1
@@ -464,14 +499,20 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         ax.text(20,5,'%d' %(j), ha='left', va='bottom', backgroundcolor='white')
     
     ## Show the ramp
+    fig.tight_layout(h_pad=0.3, w_pad=0.3, pad=0.5)
+    
     ax = fig.add_axes((0.6, 0.05, 0.37, 0.18))
+    #ax = fig.add_subplot(428)
     ax.plot(time[2:], (ramp_cps[1:,16:-16:4].T/np.diff(time)[1:]).T, alpha=0.1, color='black')
     ax.plot(time[2:], avg_ramp[1:]/np.diff(time)[1:], alpha=0.8, color='red', linewidth=2)
     ax.set_xlabel('time'); ax.set_ylabel('background [e/s]')
 
-    fig.tight_layout(h_pad=0.3, w_pad=0.3, pad=0.5)
+    #fig.tight_layout(h_pad=0.3, w_pad=0.3, pad=0.5)
     root=raw.split('_')[0]
-    plt.savefig(root+'_ramp.png')
+    #plt.savefig(root+'_ramp.png')
+    
+    canvas = FigureCanvasAgg(fig)
+    canvas.print_figure(root+'_ramp.png', dpi=200, transparent=False)
     
     #### Same ramp data file    
     np.savetxt('%s_ramp.dat' %(root), np.array([time[1:], avg_ramp/np.diff(time)]).T, fmt='%.3f')
