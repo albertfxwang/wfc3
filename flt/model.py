@@ -22,8 +22,21 @@ import stwcs
 ### Helper functions from a document written by Pirzkal, Brammer & Ryan 
 from .. import grism
 
-photflam = {'F105W': 3.0386e-20, 'F140W': 1.4737e-20, 'F160W': 1.9275602e-20}
-
+photflam = {'F098M': 6.0501324882418389e-20, 'F105W': 3.038658152508547e-20, 'F110W': 1.5274130068787271e-20, 'F125W': 2.2483414275260141e-20, 'F140W': 1.4737154005353565e-20, 'F160W': 1.9275637653833683e-20}
+photplam = {'F098M': 9864.722728110915, 'F105W': 10551.046906405772, 'F110W': 11534.45855553774, 'F125W': 12486.059785775655, 'F140W': 13922.907350356367, 'F160W': 15369.175708965562}
+ 
+if False:
+    import pysynphot as S
+    n = 1.e-20
+    spec = S.FlatSpectrum(n, fluxunits='flam')
+    photflam = {}
+    photplam = {}
+    for filter in ['F098M', 'F105W', 'F110W', 'F125W', 'F140W', 'F160W']:
+        bp = S.ObsBandpass('wfc3,ir,%s' %(filter.lower()))
+        photplam[filter] = bp.pivot()
+        obs = S.Observation(spec, bp)
+        photflam[filter] = n/obs.countrate()
+        
 class GrismFLT(object):
     """
     Scripts for simple modeling of individual grism FLT images
@@ -73,7 +86,7 @@ class GrismFLT(object):
             self.filter = self.im[0].header['FILTER'].upper()
     
             ### Full science image scaled to F_lambda
-            self.flam = self.im_data['SCI']*self.im_header['PHOTFLAM']
+            self.flam = self.im_data['SCI']*photflam[self.filter] #self.im_header['PHOTFLAM']
     
             ### xx Use full DQ mask for now
             self.dmask = self.im_data['DQ'] == 0
@@ -94,6 +107,8 @@ class GrismFLT(object):
             
             self.segimage_im = pyfits.open(self.segimage)
             self.process_segimage()
+        
+        self.pivot = photplam[self.filter]
                         
         # This needed for the C dispersing function
         self.clip = np.cast[np.double](self.flam*self.dmask)
@@ -154,6 +169,7 @@ class GrismFLT(object):
             self.im_data[ext][sly, slx] = self.im[iext].data*1
         
         self.im_data['DQ'] = self.unset_dq_bits(dq=self.im_data['DQ'], okbits=32+64+512)
+        self.im_data_sci_background = False
         
     def clean_for_mp(self):
         """
@@ -528,7 +544,43 @@ class GrismFLT(object):
             return outdata
         else:
             return True
- 
+    
+    def fit_background(self, degree=3, sn_limit=0.1, pfit=None, apply=True, verbose=True, ds9=None):
+        from astropy.modeling import models, fitting
+        
+        yp, xp = np.indices(self.sh_pad)
+        xp  = (xp - self.sh_pad[1]/2.)/(self.sh_flt[1]/2)
+        yp  = (yp - self.sh_pad[0]/2.)/(self.sh_flt[0]/2)
+        
+        if pfit is None:
+            mask = (self.im_data['DQ'] == 0) & (self.model/self.im_data['ERR'] < sn_limit) & (self.im_data['SCI'] != 0) & (self.im_data['SCI'] > -4*self.im_data['ERR']) & (self.im_data['SCI'] < 6*self.im_data['ERR'])  
+            poly = models.Polynomial2D(degree=degree)
+            fit = fitting.LinearLSQFitter()
+            pfit = fit(poly, xp[mask], yp[mask], self.im_data['SCI'][mask])
+            pout = pfit(xp, yp)
+            
+            if ds9:
+                ds9.view((self.im_data['SCI']-pout)*mask)
+        else:
+            pout = pfit(xp, yp)
+            
+        if apply:
+            if self.pad > 0:
+                slx = slice(self.pad, -self.pad)
+                sly = slice(self.pad, -self.pad)
+
+            else:
+                slx = slice(0, self.sh_flt[1])
+                sly = slice(0, self.sh_flt[0])
+                
+            self.im_data['SCI'][sly, slx] -= pout[sly, slx]
+            self.im_data_sci_background = True
+        
+        if verbose:
+            print 'fit_background, %s: p0_0=%7.4f' %(self.flt_file, pfit.parameters[0])
+                
+        self.fit_background_result = pfit #(pfit, xp, yp)
+        
 #### Testing
 if False:
     import mywfc3.flt
