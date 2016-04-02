@@ -533,8 +533,9 @@ class GroupFLT():
         """
         keep = self.FLTs[0].catalog['MAG_AUTO'] < maglim
         bright_ids = self.FLTs[0].catalog['id'][keep]            
+        mags = self.FLTs[0].catalog['MAG_AUTO'][keep]            
         so = np.argsort(self.FLTs[0].catalog['MAG_AUTO'][keep])
-        
+        N = keep.sum()
         cutout_dimensions=[10,10]
         
         for ii, id in enumerate(bright_ids[so]):
@@ -542,6 +543,9 @@ class GroupFLT():
                 beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
                 mb = mywfc3.flt.multifit.MultiBeam(beams)
             except:
+                continue
+            
+            if len(beams) == 0:
                 continue
             
             ### zero out emission line templates
@@ -555,7 +559,7 @@ class GroupFLT():
             xfit, yfit = mb.get_1d_spec(coeff, z)
             self.update_model(id, xspec=xfit, yspec=yfit)
             
-            print 'Refine: %d %d' %(ii, id)
+            print 'Refine: %4d/%4d %6d %.1f' %(ii,N, id, mags[so][ii])
             if ds9 is not None:
                 ds9.view(self.FLTs[0].im_data['SCI']-self.FLTs[0].model)
     
@@ -673,63 +677,103 @@ def func_fit(self, id):
     self.extract_and_fit(id=id)
     return 1
     
-        
+def regularize_templates():
+    """
+    Make sure the EAZY grism line templates all have the same length
+    """
+    templates = ['templates/EAZY_v1.0_lines/eazy_v1.0_sed1_nolines.dat',
+    'templates/EAZY_v1.0_lines/eazy_v1.0_sed2_nolines.dat',  
+    'templates/EAZY_v1.0_lines/eazy_v1.0_sed3_nolines.dat',     
+    'templates/EAZY_v1.0_lines/eazy_v1.0_sed4_nolines.dat',     
+    'templates/EAZY_v1.0_lines/eazy_v1.0_sed5_nolines.dat',     
+    'templates/EAZY_v1.0_lines/eazy_v1.0_sed6_nolines.dat',     
+    'templates/cvd12_t11_solar_Chabrier.extend.dat',     
+    'templates/dobos11/SF0_0.emline.loOIII.txt',    
+    'templates/dobos11/SF0_0.emline.hiOIII.txt',   
+    'templates/dobos11/bc03_pr_ch_z02_ltau07.0_age09.2_av2.5.dat']
     
+    for t in templates:
+        tx, ty = np.loadtxt('/Users/brammer/3DHST/Spectra/Work/%s' %(t), unpack=True)
+        print t, len(tx)
+    
+    tx_ref, ty = np.loadtxt('/Users/brammer/3DHST/Spectra/Work/%s' %(templates[-2]), unpack=True)
+    for t in templates:
+        tx, ty = np.loadtxt('/Users/brammer/3DHST/Spectra/Work/%s' %(t), unpack=True)
+        if len(tx) != len(tx_ref):
+            ty_ref = unicorn.utils_c.interp_conserve_c(tx_ref, tx, ty)
+        else:
+            ty_ref = ty
+        
+        if 'emline' in t:
+            plt.plot(tx_ref, ty_ref)
+            
+        np.save('/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/' + os.path.basename(t) + '.npy', [tx_ref, ty_ref/np.trapz(ty_ref, tx_ref)*1.e2])
+            
 class MultiBeam(object):
     def __init__(self, beams=[], model_min=0.05, ivar_min=[0.05,97]):
         self.beams = beams
         import pysynphot as S
-        #self.line_template_hi = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt', unpack=True)
-        #np.save(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy', [self.line_template_hi])
-        #### self.line_template_hi = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy')[0]
-        
-        #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.loOIII.txt', unpack=True)
-        #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.m.txt', unpack=True)
-        #np.save(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.emline.m.txt.npy', [self.line_template_lo])
-        #### self.line_template_lo = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.emline.m.txt.npy')[0]
-        
-        xarr = np.logspace(2,5,100)
-        yarr = xarr*0
-        cont_spec = S.ArraySpectrum(xarr, yarr, fluxunits='flam')
-        doublet = cont_spec + 1*S.GaussianSource(1., 4863, 10) + 1*S.GaussianSource(1., 4959, 10) + 2.98*S.GaussianSource(1., 5007, 10) + 0*S.GaussianSource(1, 6563., 10) + 0*S.GaussianSource(1, 6725, 10) 
-        self.line_template_lo = [doublet.wave, doublet.flux]
-        single = cont_spec + 0.*S.GaussianSource(1., 4861, 10) + 0*S.GaussianSource(1., 4959, 10) + 0*S.GaussianSource(1., 5007, 10) + 1*S.GaussianSource(1, 6563., 10) + 0.2*S.GaussianSource(1, 6731, 10) 
-        self.line_template_hi = [single.wave, single.flux]
-        
+        #self.line_template_hi = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy')[0]        
+        #self.line_template_lo = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.emline.m.txt.npy')[0]
         #self.line_template_lo = np.loadtxt(os.getenv('THREEDHST')+'/templates/cvd12_t11_solar_Chabrier.extend.m.dat', unpack=True)
-        
-        ### Make templates with identical dimensions
+               
+        ### SImple line templates
         if False:
-            yt = unicorn.utils_c.interp_conserve_c(self.line_template_hi[0], self.line_template_lo[0], self.line_template_lo[1])
-            np.savetxt(os.getenv('THREEDHST')+'/templates/cvd12_t11_solar_Chabrier.extend.m.dat', np.array([self.line_template_hi[0], yt]).T, fmt='%.6e')
-            
+            xarr = np.logspace(2,5,100)
+            yarr = xarr*0
+            cont_spec = S.ArraySpectrum(xarr, yarr, fluxunits='flam')
+            doublet = cont_spec + 1*S.GaussianSource(1., 3729, 10) + 1*S.GaussianSource(1., 4863, 10) + 1*S.GaussianSource(1., 4959, 10) + 2.98*S.GaussianSource(1., 5007, 10) + 0*S.GaussianSource(1, 6563., 10) + 0*S.GaussianSource(1, 6725, 10) 
+            self.line_template_lo = [doublet.wave, doublet.flux]
+            single = cont_spec + 0*S.GaussianSource(1., 3727, 10) + 0.*S.GaussianSource(1., 4861, 10) + 0*S.GaussianSource(1., 4959, 10) + 0*S.GaussianSource(1., 5007, 10) + 1*S.GaussianSource(1, 6563., 10) + 0.2*S.GaussianSource(1, 6731, 10) 
+            self.line_template_hi = [single.wave, single.flux]
+        
+        template_files = ['eazy_v1.0_sed1_nolines.dat',
+            'eazy_v1.0_sed2_nolines.dat',  
+            'eazy_v1.0_sed3_nolines.dat',     
+            'eazy_v1.0_sed4_nolines.dat',     
+            'eazy_v1.0_sed5_nolines.dat',     
+            'eazy_v1.0_sed6_nolines.dat',     
+            'cvd12_t11_solar_Chabrier.extend.dat',     
+            'SF0_0.emline.loOIII.txt',    
+            'SF0_0.emline.hiOIII.txt',   
+            'bc03_pr_ch_z02_ltau07.0_age09.2_av2.5.dat']
+        
+        template_files = ['/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/%s' %(file) for file in template_files]
+        self.template_wave = np.load(template_files[0]+'.npy')[0]
+        self.templates = np.array([np.load(file+'.npy')[1] for file in template_files])
+        self.NTEMP = self.templates.shape[0]
+           
         #### Initialize multifit arrays
         A = None
         y = None
         mask = None
         ivar = None
         
-        for beam in beams:
+        for ib, beam in enumerate(beams):
             beam.compute_model(beam.thumb, id=beam.id)
             beam.cmodel = beam.model[:,beam.slx].flatten()
         
             maski = (beam.ivar.flatten() != 0) & (beam.cmodel > model_min*beam.cmodel.max())
             
             if A is None:
-                A = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0., beam.cmodel*0., np.ones(beam.cmodel.size)]).T
+                A = np.zeros((beam.modelf.shape[0], self.NTEMP+len(beams)), dtype=np.float64)
+                #A = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0., beam.cmodel*0., np.ones(beam.cmodel.size)]).T
+                A[:, self.NTEMP+ib] = 1.
                 y = beam.cleanf*1
                 mask = maski
                 ivar = beam.ivar.flatten()
             else:
-                Ap = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0, beam.cmodel*0., np.ones(beam.cmodel.size)]).T
+                Ap = np.zeros((beam.modelf.shape[0], self.NTEMP+len(beams)), dtype=np.float64)
+                Ap[:,self.NTEMP+ib] = 1.
+                #Ap = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0, beam.cmodel*0., np.ones(beam.cmodel.size)]).T
                 A = np.append(A, Ap, axis=0)
                 y = np.append(y, beam.cleanf*1)
                 mask = np.append(mask, maski)
                 ivar = np.append(ivar, beam.ivar.flatten())
         
         self.A = A
-        self.y = y
-        self.ivar = ivar
+        self.y = np.cast[np.float64](y)
+        self.ivar = np.cast[np.float64](ivar)
         try:
             self.mask = mask & (self.ivar > ivar_min[0]*np.percentile(self.ivar[mask], ivar_min[1]))
         except:
@@ -743,42 +787,55 @@ class MultiBeam(object):
         """
         import sklearn.linear_model
         
-        for i, beam in enumerate(self.beams):
-            lmodel_i = beam.compute_model(beam.thumb, id=beam.id, xspec=self.line_template_lo[0]*(1+z), yspec=self.line_template_lo[1], in_place=False)
-            hmodel_i = beam.compute_model(beam.thumb, id=beam.id, xspec=self.line_template_hi[0]*(1+z), yspec=self.line_template_hi[1], in_place=False)
-            if i == 0:
-                lmodel = lmodel_i*1
-                hmodel = hmodel_i*1
-            else:
-                lmodel = np.append(lmodel, lmodel_i)
-                hmodel = np.append(hmodel, hmodel_i)
-            
         Ap = self.A*1
-        Ap[:,2] = lmodel
-        Ap[:,3] = hmodel
-        
-        if coeffs is None:
-            clf = sklearn.linear_model.LinearRegression(normalize=False, fit_intercept=False)
-            status = clf.fit(Ap[self.mask,:], self.y[self.mask])
-            coeffs = clf.coef_
+        for itemp in range(self.NTEMP):
+            for i, beam in enumerate(self.beams):
+                lmodel_i = beam.compute_model(beam.thumb, id=beam.id, xspec=self.template_wave*(1+z), yspec=self.templates[itemp,:], in_place=False)
+                if i == 0:
+                    lmodel = lmodel_i*1
+                else:
+                    lmodel = np.append(lmodel, lmodel_i)
             
-        #ls = np.linalg.lstsq(Ap[self.mask,:], self.y[self.mask])
+            Ap[:,itemp] = lmodel
+                
+        if coeffs is None:
+            # clf = sklearn.linear_model.LinearRegression(normalize=False, fit_intercept=False)
+            # status = clf.fit(Ap[self.mask,:], self.y[self.mask])
+            # coeffs = clf.coef_
+            import unicorn.utils_c
+            ### No background
+            # amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[self.mask], Ap[self.mask,:self.NTEMP].T)
+            # coeffs = unicorn.utils_c.run_nmf(self.y[self.mask], self.ivar[self.mask], Ap[self.mask,:self.NTEMP].T, amat, toler=1.e-5)
+            # coeffs = np.append(coeffs, np.zeros(len(self.beams)))
+
+            ### Fit background
+            amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[self.mask], Ap[self.mask,:].T)
+            init = np.ones(Ap.shape[1])
+            init[self.NTEMP:] = 0.05
+            # if hasattr(self, 'coeffs'):
+            #     init=self.coeffs
+            
+            coeffs = unicorn.utils_c.run_nmf(self.y[self.mask]+0.01, self.ivar[self.mask], Ap[self.mask,:].T, amat, init_coeffs=init)
+            coeffs[self.NTEMP:] -= 0.01
+            self.coeffs = coeffs
+            
+            #ls = np.linalg.lstsq(Ap[self.mask,:], self.y[self.mask])
         
         out = np.dot(Ap, coeffs)
         if get_fit:
-            return out, clf.coef_
+            return out, coeffs #clf.coef_
             
         lnp = -0.5*np.sum((out-self.y)[self.mask]**2*self.ivar[self.mask])
         
-        return lnp, clf.coef_
+        return lnp, coeffs #clf.coef_
     
-    def get_1d_spec(self, coeff, z):
-        beam = self.beams[0]
-        xpix = (self.line_template_hi[0]*(1+z) - beam.lam[0])/(beam.lam[1]-beam.lam[0])/100.
-        yspec = (coeff[0]*xpix+coeff[1]) + self.line_template_hi[1]*coeff[2] + self.line_template_lo[1]*coeff[3]
+    def get_1d_spec(self, coeffs, z):
+        #beam = self.beams[0]
+        #xpix = (self.line_template_hi[0]*(1+z) - beam.lam[0])/(beam.lam[1]-beam.lam[0])/100.
+        #yspec = (coeff[0]*xpix+coeff[1]) + self.line_template_hi[1]*coeff[2] + self.line_template_lo[1]*coeff[3]
+        #return self.line_template_hi[0]*(1+z), yspec
+        return self.template_wave*(1+z), np.dot(coeffs[:self.NTEMP], self.templates) #+ coeffs[-1]
         
-        return self.line_template_hi[0]*(1+z), yspec
-    
     def reshape_modelfit(self, out, attr='modelfit'):
         i0 = 0
         for beam in self.beams:
@@ -786,19 +843,20 @@ class MultiBeam(object):
             beam.__setattr__(attr, out[i0:i0+i1].reshape(beam.shg))
             i0 += i1
             
-    def fit_grid(self, zr=[0.7, 3.4], dz=0.01):
+    def fit_grid(self, zr=[0.7, 3.4], dz=0.01, verbose=True):
         """
         """
                 
         zgrid = np.exp(np.arange(np.log(1+zr[0]), np.log(1+zr[1]), dz))-1
         
-        
         nz = len(zgrid)
         lnp = np.zeros(nz)
-        coeffs = np.zeros((nz, 5))
+        coeffs = np.zeros((nz, self.A.shape[1]))
         for i in range(nz):
             lnp[i], coeffs[i,:] = self.fit_at_z(z=zgrid[i])
-        
+            if verbose:
+                print no_newline + 'id=%d: %.4f  - %.4f' %(self.beams[0].id, zgrid[i], lnp[i])
+                
         return zgrid, lnp, coeffs
                     
     def get_drizzle_wcs(self, center_wave=1.4e4, dlam=40, NX=100, spatial_scale=1, NY=10):
@@ -927,11 +985,21 @@ def manybeams():
 
     t0 = time.time()
     
-    pool = mp.Pool(processes=mp.cpu_count())
+    pool = mp.Pool(processes=4)
     results = [pool.apply_async(fit_MultiBeam, (file,)) for file in files]
     pool.close()
-    pool.join()
+    #pool.join()
     
+    while not results[-1]._ready:
+        print time.time()
+        for i, res in enumerate(results):
+            print i, res._ready
+        pass
+    
+    print 'Done?'
+        
+    status = res.get(timeout=1)
+        
     t1 = time.time()
     
     t0x = time.time()
@@ -1048,4 +1116,181 @@ def _FLT_compute_model(ii, fit_data={}, initialize=True, verbose=True):
 
     #### For pool.apply_async or normal calls
     return (ii, flt.modelf)
+    
+def _test_figure():
+    groups = [g102, g141]
+    driz_list = []
+    for g in groups:
+        full_beams = g.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
+        for beams in [full_beams]:#, full_beams[8:]]:
+            mb = mywfc3.flt.multifit.MultiBeam(beams)
+    
+            #refh, refwcs = mb.get_drizzle_wcs(center_wave=14000.0, dlam=46, NX=100, spatial_scale=1, NY=cutout_dimensions[0])
+            #refh['CRPIX2'] -= 2
+
+            ref, refwcs = mb.beams[0].make_wcs_header(mb.beams[0].model)
+            refh = ref.header
+            #refh['CRVAL2'] *= 2# 1
+            #refh['CD2_1'] = 0
+    
+            header, sci, wht, ctx = mb.drizzle(beam_attr='cutout_sci', pixfrac=0.3, ref_header=refh, ds9=ds9b)
+            #header, sci, wht, ctx = mb.drizzle(beam_attr='clean', pixfrac=0.3, ref_header=refh, ds9=ds9b)
+            header, contam, cwht, ctx = mb.drizzle(beam_attr='contam', pixfrac=0.3, ref_header=refh, ds9=None)
+            header, fmsci, mwht, mctx = mb.drizzle(beam_attr='model', pixfrac=0.3, ref_header=refh)
+            ds9b.view(sci-contam)
+    
+            driz_beam = copy.copy(mb.beams[0])
+            driz_beam.cutout_sci = np.roll(sci, -1, axis=1)
+            driz_beam.contam = np.roll(contam, -1, axis=1)
+            driz_beam.clean = np.roll(sci-contam, -1, axis=1)
+            driz_beam.cleanf = driz_beam.clean.flatten()
+            driz_beam.thumb *= 0.
+            for ib, beam in enumerate(beams):
+                driz_beam.thumb += mb.beams[ib].thumb/len(beams)
+        
+            #driz_beam.cleanf = (sci-contam).flatten()
+            min_err = 0.05
+            wht = 1./(1/wht+(min_err*fmsci)**2)
+            driz_beam.ivar = np.roll(wht, -1, axis=1).flatten()
+            driz_list.append(driz_beam)
+        
+    mbd = mywfc3.flt.multifit.MultiBeam(driz_list)
+    #mbd = mb
+    
+    zgrid, lnp, coeffs = mbd.fit_grid(zr=zr, dz=dz)
+    #lnp = np.log(nd.gaussian_filter(np.exp(lnp-lnp.max()), 2))
+    lnp = nd.gaussian_filter(lnp, dz/0.001)
+    
+    z_gris, lnp_max = get_parabola_max(zgrid, lnp)
+    #plt.plot(zgrid, lnp-lnp_max)
+    #plt.scatter(z_gris, 0, color='k')
+    
+    if zsp:
+        print 'dz/(1+z): %.4f' %((z_gris-zsp)/(1+zsp))
+        #plt.plot(zsp*np.ones(2), [(lnp-lnp.max()).min(), 0], color='k')
+    
+    out, coeff = mbd.fit_at_z(z=z_gris, get_fit=True)
+    xfit, yfit = mbd.get_1d_spec(coeff, z_gris)
+    #group.update_model(id, xspec=xfit, yspec=yfit)
+    
+    mbd.reshape_modelfit(out, attr='modelfit')
+    #refh['CRPIX2'] += 0.1
+    #header, msci, mwht, mctx = mb.drizzle(beam_attr='modelfit', pixfrac=0.3, ref_header=refh)
+    
+    import matplotlib.gridspec as gridspec
+    
+    gs = gridspec.GridSpec(6, len(mbd.beams))
+    gst = gridspec.GridSpec(6, len(mbd.beams))
+    gst.update(hspace=0.1)
+    
+    fig = plt.figure(figsize=[5*len(mbd.beams),7])
+    
+    spec_axes, all_max = [], 0
+    
+    for ib, beam in enumerate(mbd.beams):
+        ref, refwcs = beam.make_wcs_header(beam.model)
+        refh_out = ref.header
+        wave = (np.arange(refh_out['NAXIS1'])-refh_out['CRPIX1'])*refh_out['CD1_1'] + refh_out['CRVAL1']
+    
+        ### Optimal extractions
+        beam.compute_model(beam.thumb, id=beam.id)
+        prof = beam.model/beam.model.sum(axis=0)
+        
+        owht = beam.ivar.reshape(beam.shg)
+        num = prof*((beam.cutout_sci-coeff[mbd.NTEMP+ib])*owht)
+        cnum = prof*(beam.contam*owht)
+        den = prof**2*owht
+        opt = num.sum(axis=0)/den.sum(axis=0)
+        copt = cnum.sum(axis=0)/den.sum(axis=0)
+        opt_var = 1./den.sum(axis=0)
+        mnum = prof*((beam.modelfit-coeff[mbd.NTEMP+ib])*owht)
+        mopt = mnum.sum(axis=0)/den.sum(axis=0)
+        
+        ys = np.interp(wave, beam.lam, beam.ysens)
+        ys[ys < 0.1*ys.max()] = np.nan
+        for arr in [opt, copt, mopt]:
+            arr *= 100/ys
+        
+        opt_var *= (100/ys)**2
+        
+        #max = np.percentile(osci-ocontam, 100)
+        max = (beam.clean[beam.model > 0]).max()
+        if wave.max() > 1.4e4:
+            xr = [1.02e4,1.76e4]
+            xi = np.arange(1.1,1.71,0.1)
+        else:
+            xr = [0.76e4,1.19e4]
+            xi = np.arange(0.8,1.11,0.1)
+        
+        for ii, data in enumerate([beam.clean, beam.modelfit]):
+            ax = fig.add_subplot(gst[ii,ib])
+            ax.imshow(data, vmin=-0.1*max, vmax=max, interpolation='Nearest', aspect='auto', origin='lower')
+            ax.set_xlim(np.interp(xr, wave, np.arange(beam.shg[1])))
+            ax.set_ylim(beam.shg[0]/2.+1+np.array([-1,1])*beam.cutout_dimensions[0])
+            ax.set_xticklabels([]); ax.set_yticklabels([])
+            ax.set_xticks(np.interp(xi*1.e4, wave, np.arange(beam.shg[1])))
+        
+        ax = fig.add_subplot(gs[2:4,ib])
+        
+        ax.plot(wave/1.e4, opt, alpha=0.5, color='0.5', linestyle='steps-mid')
+        ax.plot(wave/1.e4, opt-copt, alpha=0.5, color='k', linestyle='steps-mid')
+        ax.fill_between(wave/1.e4, opt-copt, wave*0., alpha=0.1, color='0.5')
+        ax.plot(wave/1.e4, mopt, alpha=0.5, color='r', linestyle='steps-mid', linewidth=2)
+        ax.errorbar(wave/1.e4, opt-copt, np.sqrt(opt_var), linestyle='None', marker='.', color='k', ecolor='k', alpha=0.5)
+        ax.set_xlim(np.array(xr)/1.e4)
+        #ax.set_xticklabels([]); #ax.set_yticklabels([])
+        ax.set_ylabel('flux (e/s)')
+        ax.set_xlabel(r'$\lambda$')
+    
+        if wave.max() > 1.4e4:
+            ymax = (opt-copt+np.sqrt(opt_var))[(wave > 1.1e4) & (wave < 1.65e4) & np.isfinite(opt_var)].max()
+        else:
+            ymax = (opt-copt+np.sqrt(opt_var))[(wave > 0.85e4) & (wave < 1.12e4) & np.isfinite(opt_var)].max()
+        
+        ax.set_ylim(-0.3*ymax, 1.1*ymax)
+        all_max = np.maximum(ymax, all_max)
+        spec_axes.append(ax)
+    
+    for axx in spec_axes:
+        axx.set_ylim(-0.15*all_max, 1.1*all_max)
+        axx.grid(alpha=0.2)
+    
+    axx.set_yticklabels([])
+        
+    #### p(z)
+    #gs = gridspec.GridSpec(6, 1)
+    ax = fig.add_subplot(gs[4:,0])
+    ax.plot(zgrid, lnp-lnp_max, color='b')
+    ax.fill_between(zgrid, lnp-lnp_max, (lnp-lnp_max).min(), color='b', alpha=0.1)
+    
+    if zsp:
+        #ax.vlines(np.array([3727, 4959, 5007, 6563])*(1+zsp)/1.e4, (lnp-lnp_max).min(), 0, color='r', alpha=0.8)
+        ax.vlines([zsp], (lnp-lnp_max).min(), 0, color='r', alpha=0.8)
+    
+    ### 
+    # eazypz = eazy.getEazyPz(np.arange(len(c))[c['id'] == id][0], MAIN_OUTPUT_FILE=os.path.basename(z.filename.split('.zout')[0]), OUTPUT_DIRECTORY=os.path.dirname(z.filename), CACHE_FILE='Same', binaries=None, get_prior=False)
+    # eazy_lnp = np.log(eazypz[1])
+    # ax.plot(eazypz[0], eazy_lnp - eazy_lnp.max(), color='k', alpha=0.4)
+    # 
+    ax.scatter(z_gris, 0)
+    ymin = (lnp-lnp_max).min()
+    ax.text(z_gris, -0.08*ymin, '%.3f' %(z_gris), ha='center', va='top', fontsize=9)
+    ax.set_xlim(zgrid.min(), zgrid.max()) 
+    #ax.set_xlim(np.array(xr)/1.e4)
+   
+    ax.set_xlabel(r'z'); ax.set_ylabel(r'ln $p = -0.5\chi^2$')
+    #pzline = np.log(np.maximum(coeffs[:,3], 1.e-20))+lnp
+    #ax.plot((1+zgrid)*5007./1.e4, pzline-pzline.max(), color='green')
+
+    ax.set_ylim(ymin, -0.1*ymin)
+        
+    if len(mbd.beams) > 1:
+        ax = fig.add_subplot(gs[4:,1])    
+        pz = np.exp(lnp-lnp_max); pt = np.trapz(pz, zgrid)
+        ax.plot(zgrid, pz, color='b')
+        ax.fill_between(zgrid, pz, color='b', alpha=0.1)
+        ax.set_xlabel(r'z'); ax.set_ylabel(r'$p(z)$')
+        ax.set_yticklabels([])
+        
+    fig.tight_layout(pad=0.5)
     

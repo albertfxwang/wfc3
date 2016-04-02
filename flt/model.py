@@ -169,6 +169,11 @@ class GrismFLT(object):
             self.im_data[ext][sly, slx] = self.im[iext].data*1
         
         self.im_data['DQ'] = self.unset_dq_bits(dq=self.im_data['DQ'], okbits=32+64+512)
+        ### Negative pixels
+        neg_pixels = self.im_data['SCI'] < -3*self.im_data['ERR']
+        self.im_data['DQ'][neg_pixels] |= 1024
+        self.im_data['SCI'][self.im_data['DQ'] > 0] = 0
+        
         self.im_data_sci_background = False
         
     def clean_for_mp(self):
