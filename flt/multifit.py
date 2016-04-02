@@ -541,25 +541,26 @@ class GroupFLT():
         for ii, id in enumerate(bright_ids[so]):
             try:
                 beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
-                mb = mywfc3.flt.multifit.MultiBeam(beams)
+                if len(beams) == 0:
+                    continue
+            
+                mb = mywfc3.flt.multifit.MultiBeam(beams, simple_templates=True)
             except:
+                print 'id=%d Failed' %(id)
                 continue
-            
-            if len(beams) == 0:
-                continue
-            
+                        
             ### zero out emission line templates
-            mb.A[:,2:] *= 0.
-            mb.line_template_hi[1]*=0
-            mb.line_template_lo[1]*=0 
+            #mb.A[:,2:] *= 0.
+            #mb.line_template_hi[1]*=0
+            #mb.line_template_lo[1]*=0 
             
             z = 0
             
-            out, coeff = mb.fit_at_z(z=z, get_fit=True)
+            out, coeff = mb.fit_at_z(z=z, get_fit=True, fit_background=True)
             xfit, yfit = mb.get_1d_spec(coeff, z)
             self.update_model(id, xspec=xfit, yspec=yfit)
             
-            print 'Refine: %4d/%4d %6d %.1f' %(ii,N, id, mags[so][ii])
+            print 'Refine: %4d/%4d %6d %.1f %s' %(ii,N, id, mags[so][ii], ' '.join(['%.1e' %(co) for co in coeff]))
             if ds9 is not None:
                 ds9.view(self.FLTs[0].im_data['SCI']-self.FLTs[0].model)
     
@@ -710,7 +711,7 @@ def regularize_templates():
         np.save('/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/' + os.path.basename(t) + '.npy', [tx_ref, ty_ref/np.trapz(ty_ref, tx_ref)*1.e2])
             
 class MultiBeam(object):
-    def __init__(self, beams=[], model_min=0.05, ivar_min=[0.05,97]):
+    def __init__(self, beams=[], model_min=0.05, ivar_min=[0.05,97], simple_templates=False):
         self.beams = beams
         import pysynphot as S
         #self.line_template_hi = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy')[0]        
@@ -727,22 +728,37 @@ class MultiBeam(object):
             single = cont_spec + 0*S.GaussianSource(1., 3727, 10) + 0.*S.GaussianSource(1., 4861, 10) + 0*S.GaussianSource(1., 4959, 10) + 0*S.GaussianSource(1., 5007, 10) + 1*S.GaussianSource(1, 6563., 10) + 0.2*S.GaussianSource(1, 6731, 10) 
             self.line_template_hi = [single.wave, single.flux]
         
-        template_files = ['eazy_v1.0_sed1_nolines.dat',
-            'eazy_v1.0_sed2_nolines.dat',  
-            'eazy_v1.0_sed3_nolines.dat',     
-            'eazy_v1.0_sed4_nolines.dat',     
-            'eazy_v1.0_sed5_nolines.dat',     
-            'eazy_v1.0_sed6_nolines.dat',     
-            'cvd12_t11_solar_Chabrier.extend.dat',     
-            'SF0_0.emline.loOIII.txt',    
-            'SF0_0.emline.hiOIII.txt',   
-            'bc03_pr_ch_z02_ltau07.0_age09.2_av2.5.dat']
+        if simple_templates:
+            if len(self.beams) > 0:
+                lam = self.beams[0].lam*1
+            else:
+                lam = np.arange(7000,1.6e4,40)
+                
+            #med = np.median(lam)
+            max = lam.max()*1.1
+            min = lam.min()*0.9
+            lam = np.arange(min, max, 10)
+            width = max - min
+            self.templates = np.array([(lam-min)/width, (max-lam)/width])
+            self.template_wave = lam
+        else:
+            template_files = ['eazy_v1.0_sed1_nolines.dat',
+                'eazy_v1.0_sed2_nolines.dat',  
+                'eazy_v1.0_sed3_nolines.dat',     
+                'eazy_v1.0_sed4_nolines.dat',     
+                'eazy_v1.0_sed5_nolines.dat',     
+                'eazy_v1.0_sed6_nolines.dat',     
+                'cvd12_t11_solar_Chabrier.extend.dat',     
+                'SF0_0.emline.loOIII.txt',    
+                'SF0_0.emline.hiOIII.txt',   
+                'bc03_pr_ch_z02_ltau07.0_age09.2_av2.5.dat']
         
-        template_files = ['/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/%s' %(file) for file in template_files]
-        self.template_wave = np.load(template_files[0]+'.npy')[0]
-        self.templates = np.array([np.load(file+'.npy')[1] for file in template_files])
+            template_files = ['/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/%s' %(file) for file in template_files]
+            self.template_wave = np.load(template_files[0]+'.npy')[0]
+            self.templates = np.array([np.load(file+'.npy')[1] for file in template_files])
+            
         self.NTEMP = self.templates.shape[0]
-           
+        
         #### Initialize multifit arrays
         A = None
         y = None
@@ -779,7 +795,7 @@ class MultiBeam(object):
         except:
             self.mask = mask
             
-    def fit_at_z(self, z=0, coeffs=None, get_fit=False):
+    def fit_at_z(self, z=0, coeffs=None, get_fit=False, fit_background=True):
         """
         TBD: add photometric constraints, at least from the direct image.
              - should help fits of bright continuum objects
@@ -803,23 +819,24 @@ class MultiBeam(object):
             # status = clf.fit(Ap[self.mask,:], self.y[self.mask])
             # coeffs = clf.coef_
             import unicorn.utils_c
-            ### No background
-            # amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[self.mask], Ap[self.mask,:self.NTEMP].T)
-            # coeffs = unicorn.utils_c.run_nmf(self.y[self.mask], self.ivar[self.mask], Ap[self.mask,:self.NTEMP].T, amat, toler=1.e-5)
-            # coeffs = np.append(coeffs, np.zeros(len(self.beams)))
+            if fit_background:
+                ### Fit background
+                mask_nneg = self.mask & (self.y > 0)
+                amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[mask_nneg], Ap[mask_nneg,:].T)
+                init = np.ones(Ap.shape[1])
+                init[self.NTEMP:] = 0.01
+                # if hasattr(self, 'coeffs'):
+                #     init=self.coeffs
+                coeffs = unicorn.utils_c.run_nmf(self.y[mask_nneg]+0.01, self.ivar[mask_nneg], Ap[mask_nneg,:].T, amat, init_coeffs=init)
+                coeffs[self.NTEMP:] -= 0.01
+                #self.coeffs = coeffs
+            else:
+                ### No background
+                mask_nneg = self.mask & (self.y > 0)
+                amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[mask_nneg], Ap[mask_nneg,:self.NTEMP].T)
+                coeffs = unicorn.utils_c.run_nmf(self.y[mask_nneg], self.ivar[mask_nneg], Ap[mask_nneg,:self.NTEMP].T, amat, toler=1.e-5)
+                coeffs = np.append(coeffs, np.zeros(len(self.beams)))
 
-            ### Fit background
-            amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[self.mask], Ap[self.mask,:].T)
-            init = np.ones(Ap.shape[1])
-            init[self.NTEMP:] = 0.05
-            # if hasattr(self, 'coeffs'):
-            #     init=self.coeffs
-            
-            coeffs = unicorn.utils_c.run_nmf(self.y[self.mask]+0.01, self.ivar[self.mask], Ap[self.mask,:].T, amat, init_coeffs=init)
-            coeffs[self.NTEMP:] -= 0.01
-            self.coeffs = coeffs
-            
-            #ls = np.linalg.lstsq(Ap[self.mask,:], self.y[self.mask])
         
         out = np.dot(Ap, coeffs)
         if get_fit:

@@ -54,7 +54,7 @@ def disperse_grism_object(np.ndarray[DTYPE_t, ndim=2] flam, np.ndarray[FTYPE_t, 
                     full[k2] += ysens[k]*fl_ij*(1-yfrac[k])
     
     return True
-
+    
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.embedsignature(True)

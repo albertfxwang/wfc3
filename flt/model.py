@@ -342,7 +342,7 @@ class GrismFLT(object):
             if (xi > 1014-201) | (yi < cutout_dimensions[0]) | (yi > 1014-20) | (xi < cutout_dimensions[1]):
                 continue
                 
-            beam = BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam='A', conf=self.conf, direct_flam=self.flam, grism_flt=self.im)
+            beam = BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam='A', conf=self.conf, GrismFLT=self) #direct_flam=self.flam, grism_flt=self.im)
             ix = self.seg_ids == id
             
             dx, dy, ccx, ccy = beam.align_spectrum(xspec=xspec, yspec=yspec)
@@ -491,11 +491,6 @@ class GrismFLT(object):
     def compute_model(self, id=0, x=588.28, y=40.54, sh=[10,10], xspec=None, yspec=None, beam='A', verbose=False, in_place=True, outdata=None):
         """
         Compute a model spectrum, so simple!
-        
-        TBD:
-            o segmentation images
-            o arbitrary input spectral models
-            ...
         """
         
         from . import disperse
@@ -506,17 +501,21 @@ class GrismFLT(object):
         
         ### Get dispersion parameters at the reference position
         dy, lam = self.conf.get_beam_trace(x=x-self.pad, y=y-self.pad, dx=self.conf.dxlam[beam]+xcenter, beam=beam)
-        dyc = np.cast[int](dy)+1
+        dyc = np.cast[int](dy+20)-20+1 # 20 for handling int of small negative numbers
         
         ### Account for pixel centering of the trace
         yfrac = dy-np.floor(dy)
         
         ### Interpolate the sensitivity curve on the wavelength grid. 
-        ### xx still doesn't take an arbitrary spectrum as input but assumes F_lambda**beta
-        ysens = unicorn.utils_c.interp_conserve_c(lam, self.conf.sens[beam]['WAVELENGTH'], self.conf.sens[beam]['SENSITIVITY'])/1.e17*(lam[1]-lam[0])
+        ysens = lam*0
+        so = np.argsort(lam)
+        ysens[so] = unicorn.utils_c.interp_conserve_c(lam[so], self.conf.sens[beam]['WAVELENGTH'], self.conf.sens[beam]['SENSITIVITY'])/1.e17*np.abs(lam[1]-lam[0])
         if xspec is not None:
-            yspec_int = unicorn.utils_c.interp_conserve_c(lam, xspec, yspec)
+            yspec_int = ysens*0.
+            yspec_int[so] = unicorn.utils_c.interp_conserve_c(lam[so], xspec, yspec)
             ysens *= yspec_int
+        
+        #print 'XXX', id, x, y, beam, ysens.max()
             
         x0 = np.array([yc, xc])
         slx = self.conf.dxlam[beam]+xc
@@ -538,13 +537,11 @@ class GrismFLT(object):
             
             return False
             
-        ### Loop over pixels in the direct FLT and add them into a final 2D spectrum (in the full (flattened) FLT frame)
-        ## need better handling of segmentation images
-        ## big problem:  adds into the output array, initializing full array to zero would be very slow
+        ### Loop over pixels in the direct FLT and add them into a final 2D spectrum 
+        ### (in the full (flattened) FLT frame)
+        ## adds into the output array, initializing full array to zero would be very slow
         status = disperse.disperse_grism_object(self.clip, self.seg, id, idxl, yfrac[ok], ysens[ok], outdata, x0, np.array(self.clip.shape), np.array(sh), np.array(self.sh_pad))
-        
-        #outdata = outdata[:,:self.shg[1]]
-        
+                
         if not in_place:
             return outdata
         else:
