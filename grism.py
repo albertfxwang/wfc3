@@ -84,7 +84,7 @@ class aXeConf():
         for beam in self.orders:
             if self.orders[beam] > 0:
                 self.beams.append(beam)
-                self.dxlam[beam] = np.arange(self.conf['BEAM%s' %(beam)][0], self.conf['BEAM%s' %(beam)][1], dtype=int)
+                self.dxlam[beam] = np.arange(self.conf['BEAM%s' %(beam)].min(), self.conf['BEAM%s' %(beam)].max(), dtype=int)
                 self.nx[beam] = int(self.dxlam[beam].max()-self.dxlam[beam].min())+1
                 self.sens[beam] = Table.read('%s/%s' %(os.path.dirname(self.conf_file), self.conf['SENSITIVITY_%s' %(beam)]))
                 #self.sens[beam].wave = np.cast[np.double](self.sens[beam]['WAVELENGTH'])
@@ -97,7 +97,7 @@ class aXeConf():
                     self.sens[beam].add_column(Column(data=data, name=col))
                 
                 ### Scale BEAM F
-                if (beam == 'F') & ('G141' in self.conf_file):
+                if (beam == 'F') & ('G141' in self.conf_file): # & ('gbb' in self.conf_file):
                     self.sens[beam]['SENSITIVITY'] *= 0.35
                     
                 # wave = np.cast[np.double](self.sens[beam]['WAVELENGTH'])

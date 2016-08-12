@@ -37,10 +37,11 @@ def get_flat(hdulist):
     flat = flat_im[1].data
     return flat_im, flat
 
-def fetch_calibs(ima_file, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/', verbose=True):
+def fetch_calibs(ima_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/references/hst/', verbose=True):
     """
     Fetch necessary calibration files needed for running calwf3 from STScI FTP
-    """
+    
+    Old FTP dir: ftp://ftp.stsci.edu/cdbs/iref/"""
     import os
     
     if not os.getenv('iref'):
@@ -49,9 +50,13 @@ def fetch_calibs(ima_file, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/', verbose=True
         
     im = pyfits.open(ima_file)
     for ctype in ['BPIXTAB', 'CCDTAB', 'OSCNTAB', 'CRREJTAB', 'DARKFILE', 'NLINFILE', 'PFLTFILE', 'IMPHTTAB', 'IDCTAB']:
-        cimg = im[0].header[ctype].split('iref$')[1]
         if verbose:
-            print 'Calib: %s=%s' %(ctype, cimg)
+            print 'Calib: %s=%s' %(ctype, im[0].header[ctype])
+
+        if im[0].header[ctype] == 'N/A':
+            continue
+        
+        cimg = im[0].header[ctype].split('iref$')[1]
         
         iref_file = os.path.join(os.getenv('iref'), cimg)
         if not os.path.exists(iref_file):
@@ -115,7 +120,7 @@ def split_multiaccum(ima, scale_flat=True, get_err=False):
         return cube, dq, time, NSAMP
         
          
-def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True, stats_region=[[0,1014], [0,1014]]):
+def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_saturated=True, flatten_ramp=True, stats_region=[[300,714], [300,714]]):
     """
     Run calwf3, if necessary, to generate ima & flt files.  Then put the last
     read of the ima in the FLT SCI extension and let Multidrizzle flag 
@@ -136,8 +141,10 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     
     #### Turn off CR rejection    
     raw_im = pyfits.open(raw, mode='update')
-    
-    status = fetch_calibs(raw, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
+    if raw_im[0].header['DETECTOR'] == 'UVIS':
+        return True
+        
+    status = fetch_calibs(raw) #, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
     if not status:
         return False
         
@@ -146,7 +153,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         raw_im.flush()
     
     #### Run calwf3
-    wfc3tools.calwf3.calwf3(raw)
+    wfc3tools.calwf3(raw)
     
     flt = pyfits.open(raw.replace('raw', 'flt'), mode='update')
     ima = pyfits.open(raw.replace('raw', 'ima'))
@@ -196,6 +203,40 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             final_dark -= dark_diff[read,:,:]
             final_exptime -= dt[read]
         
+        if False:
+            ### Experimenting with automated flagging
+            sh = (1024,1024)
+            drate = (diff.reshape((14,-1)).T/dt).T
+            med = np.median(drate, axis=0)
+            fmed = np.median(med)
+            nmad = 1.48*np.median(np.abs(drate-med), axis=0)
+            
+            drate_ma = np.ma.masked_array(drate, mask=~np.isfinite(drate))
+            wht_ma = drate_ma*0
+            
+            excess = med*0.
+            for read in range(1,NSAMP-1):
+                med_i = np.percentile(drate[read,:]-med, 20)
+                excess_electrons = (drate[read,:]-med-med_i)*dt[read]
+                rms = np.sqrt((fmed + med_i)*dt[read])
+                
+                hot = (excess_electrons / rms) > 10
+                #sm = nd.median_filter(excess_electrons.reshape(sh), 10).flatten()
+                #hot |= (sm / rms) > 3
+                
+                med_i = np.percentile((drate[read,:]-med)[~hot], 50)
+                print med_i
+                
+                drate_ma.mask[read, hot] |= True
+                drate_ma.data[read,:] -= med_i
+                wht_ma.mask[read, hot] |= True
+                wht_ma.data[read,:] = dt[read]
+            
+            wht_ma.mask[0,:] = True
+            
+            avg = (drate_ma*wht_ma).sum(axis=0)/wht_ma.sum(axis=0)
+            pyfits.writeto('%s_avg.fits' %(raw.split('_raw')[0]), data=avg.data.reshape(sh)[5:-5,5:-5], clobber=True)
+                
         #### Removed masked regions of individual reads
         if len(masks) > 0:
             import pyregion
@@ -292,7 +333,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
                 os.remove(file)
         
             #### Run calwf3 on cleaned IMA
-            wfc3tools.calwf3.calwf3(raw.replace('raw', 'ima'))
+            wfc3tools.calwf3(raw.replace('raw', 'ima'))
             
             #### Put results into an FLT-like file
             ima = pyfits.open(raw.replace('raw', 'ima_ima'))
@@ -324,7 +365,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     #### For saturated pixels, look for last read that was unsaturated
     #### Background will be different under saturated pixels but maybe won't
     #### matter so much for such bright objects.
-    if fix_saturated:
+    if (fix_saturated):
         print 'Fix Saturated pixels:'
         #### Saturated pixels
         zi, yi, xi = np.indices(dq.shape)
@@ -381,7 +422,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     flt[0].header['IMASAT'] = (fix_saturated*1, 'Manually fixed saturation')
     flt[0].header['NPOP'] = (len(pop_reads), 'Number of reads popped from the sequence')
     for iread, read in enumerate(pop_reads):
-        flt[0].header['POPREAD%d' %(iread+1)] = (read, 'Read kicked out of the MULTIACCUM sequence')
+        flt[0].header['POPRD%02d' %(iread+1)] = (read, 'Read kicked out of the MULTIACCUM sequence')
         
     flt.flush()
     
@@ -389,7 +430,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     if remove_ima:
         os.remove(raw.replace('raw', 'ima'))
 
-def reprocess_parallel(files):
+def reprocess_parallel(files, cpu_count=0, skip=True):
     """
     """
     
@@ -397,15 +438,23 @@ def reprocess_parallel(files):
     import time
     
     t0_pool = time.time()
-    pool = mp.Pool(processes=mp.cpu_count())
-
+    if cpu_count <= 0:
+        cpu_count = mp.cpu_count()
+        
+    pool = mp.Pool(processes=cpu_count)
+    
+    if skip:
+        for i in range(len(files))[::-1]:
+            if os.path.exists(files[i].replace('_raw.fits', '_flt.fits')):
+                p = files.pop(i)
+                
     results = [pool.apply_async(make_IMA_FLT, (file, [], True, True, True, [[300,700],[300,700]])) for file in files]
     pool.close()
     pool.join()
-
+    
     t1_pool = time.time()
     
-def show_ramps_parallel(files):
+def show_ramps_parallel(files, cpu_count=0, skip=True):
     """
     """
     
@@ -413,8 +462,16 @@ def show_ramps_parallel(files):
     import time
     
     t0_pool = time.time()
-    pool = mp.Pool(processes=mp.cpu_count())
-
+    if cpu_count <= 0:
+        cpu_count = mp.cpu_count()
+        
+    pool = mp.Pool(processes=cpu_count)
+    
+    if skip:
+        for i in range(len(files))[::-1]:
+            if os.path.exists(files[i].replace('_raw.fits', '_ramp.png')):
+                p = files.pop(i)
+    
     results = [pool.apply_async(show_MultiAccum_reads, (file, False, False, [[300,700],[300,700]])) for file in files]
     pool.close()
     pool.join()
@@ -435,7 +492,7 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
     else:
         logger.setLevel(logging.WARN)
 
-    status = fetch_calibs(raw, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
+    status = fetch_calibs(raw) #, ftpdir='ftp://ftp.stsci.edu/cdbs/iref/')
     if not status:
         return False
         
@@ -541,7 +598,7 @@ def show_MultiAccum_reads(raw='ibp329isq_raw.fits', flatten_ramp=False, verbose=
         imraw.writeto(raw.replace('q_raw', 'x_raw'), clobber=True)
         
         ## Run calwf3
-        wfc3tools.calwf3.calwf3(raw.replace('q_raw', 'x_raw'))
+        wfc3tools.calwf3(raw.replace('q_raw', 'x_raw'))
                 
     return fig
     

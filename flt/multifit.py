@@ -139,7 +139,7 @@ def go():
     print 'dz/(1+z): %.4f' %((z_gris-zsp)/(1+zsp))
     plt.plot(zsp*np.ones(2), [(lnp-lnp.max()).min(), 0], color='k')
     
-    out, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
+    out, Ap, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
     xfit, yfit = mb.get_1d_spec(coeff, z_gris)
     #self.update_model(id, xspec=xfit, yspec=yfit)
     
@@ -203,6 +203,12 @@ def get_parabola_max(x, y):
     fit = fitting.LinearLSQFitter()
 
     ix = np.argmax(y)
+    if ix == 0:
+        ix = 1
+    
+    if ix == (len(y)-1):
+        ix -= 1
+        
     p2 = models.Polynomial1D(degree=2)
     px = fit(p2, x[ix-1:ix+2], y[ix-1:ix+2]/y.max())
     dx = -px.parameters[1]/(2*px.parameters[2])
@@ -273,6 +279,9 @@ class GroupFLT():
         
         self.init_fit_data()
         
+        self.dispersion_PA = np.array([flt.dispersion_PA for flt in self.FLTs])
+        self.round_dispersion_PA = np.cast[int](np.round(self.dispersion_PA))
+        self.grism = np.array([flt.grism for flt in self.FLTs])
         
     def _read_FLTs(self, files, initialize=True, parallel=True):
         import multiprocessing as mp
@@ -332,10 +341,16 @@ class GroupFLT():
     def fix_fit_data(self, id):
         pass
     
-    def get_beams(self, id=995, fcontam=1, cutout_dimensions=[14,14], ds9=None):
-        
+    def get_beams(self, id=995, fcontam=1, cutout_dimensions=[14,14], ds9=None, flt_mask=None, beam_name='A'):
+        """
+        Get beams for a given object
+        """
         beams = []
         for ii, flt in enumerate(self.FLTs):
+            if flt_mask is not None:
+                if not flt_mask[ii]:
+                    continue
+                    
             if id not in flt.catalog['id']:
                 continue
             
@@ -350,7 +365,7 @@ class GroupFLT():
                 pass
                 #print xi, yi
             
-            beam = mywfc3.flt.model.BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam='A', conf=flt.conf, GrismFLT=flt) #direct_flam=flt.flam, grism_flt=flt.im)
+            beam = mywfc3.flt.model.BeamCutout(x=xi, y=yi, cutout_dimensions=cutout_dimensions, beam=beam_name, conf=flt.conf, GrismFLT=flt) #direct_flam=flt.flam, grism_flt=flt.im)
             beam.shc = beam.cutout_sci.shape
             if np.product(beam.shc) != np.product(beam.shg):
                 continue
@@ -526,18 +541,32 @@ class GroupFLT():
                 
         self.dt = t1_pool - t0_pool
     
-    def refine_model(self, maglim=23, ds9=None):
+    def refine_model(self, maglim=23, ds9=None, off=0.04):
         """
         Update the parent contamination model based on a simple continuum
         fit to the bright objects in the catalog
+        
+        offset to allow for negative backgrounds and non-negative coefficient fits
         """
-        keep = self.FLTs[0].catalog['MAG_AUTO'] < maglim
-        bright_ids = self.FLTs[0].catalog['id'][keep]            
-        mags = self.FLTs[0].catalog['MAG_AUTO'][keep]            
-        so = np.argsort(self.FLTs[0].catalog['MAG_AUTO'][keep])
-        N = keep.sum()
+        
+        bright_ids = []
+        mags = []
+        
+        for flt in self.FLTs:
+            keep = flt.catalog['MAG_AUTO'] < maglim
+            ids_i = flt.catalog['id'][keep]            
+            mags_i = flt.catalog['MAG_AUTO'][keep]          
+            for id, mag in zip(ids_i, mags_i):
+                if id not in bright_ids:
+                    bright_ids = np.append(bright_ids, id)
+                    mags = np.append(mags, mag)
+                    
+        so = np.argsort(mags)
+        N = len(mags)
         cutout_dimensions=[10,10]
         
+        #off = 0.04
+                
         for ii, id in enumerate(bright_ids[so]):
             try:
                 beams = self.get_beams(id=id, cutout_dimensions=cutout_dimensions, ds9=None)
@@ -548,7 +577,9 @@ class GroupFLT():
             except:
                 print 'id=%d Failed' %(id)
                 continue
-                        
+            
+            mb.y += off
+            
             ### zero out emission line templates
             #mb.A[:,2:] *= 0.
             #mb.line_template_hi[1]*=0
@@ -556,7 +587,7 @@ class GroupFLT():
             
             z = 0
             
-            out, coeff = mb.fit_at_z(z=z, get_fit=True, fit_background=True)
+            out, Ap, coeff = mb.fit_at_z(z=z, get_fit=True, fit_background=True)
             xfit, yfit = mb.get_1d_spec(coeff, z)
             self.update_model(id, xspec=xfit, yspec=yfit)
             
@@ -576,7 +607,7 @@ class GroupFLT():
     
     def load_data(self, file='multifit.npy', verbose=True, recompute_model=True, apply_background=True):
         if verbose:
-            print 'Load data: %s' %(file)
+            print '\n==========\nLoad data: %s\n' %(file)
         
         indata = np.load(file)[0]
         if 'fit_data' in indata.keys():
@@ -711,7 +742,7 @@ def regularize_templates():
         np.save('/Users/brammer/3DHST/Spectra/Work/templates/match_grism_templates/' + os.path.basename(t) + '.npy', [tx_ref, ty_ref/np.trapz(ty_ref, tx_ref)*1.e2])
             
 class MultiBeam(object):
-    def __init__(self, beams=[], model_min=0.05, ivar_min=[0.05,97], simple_templates=False):
+    def __init__(self, beams=[], model_min=0.01, ivar_min=[0.05,97], simple_templates=False):
         self.beams = beams
         import pysynphot as S
         #self.line_template_hi = np.load(os.getenv('THREEDHST')+'/templates/dobos11/SF0_0.emline.hiOIII.txt.npy')[0]        
@@ -735,8 +766,8 @@ class MultiBeam(object):
                 lam = np.arange(7000,1.6e4,40)
                 
             #med = np.median(lam)
-            max = lam.max()*1.1
-            min = lam.min()*0.9
+            max = lam.max()*1.05
+            min = lam.min()*0.95
             lam = np.arange(min, max, 10)
             width = max - min
             self.templates = np.array([(lam-min)/width, (max-lam)/width])
@@ -783,7 +814,7 @@ class MultiBeam(object):
                 Ap[:,self.NTEMP+ib] = 1.
                 #Ap = np.vstack([(beam.xpf*beam.cmodel), beam.cmodel, beam.cmodel*0, beam.cmodel*0., np.ones(beam.cmodel.size)]).T
                 A = np.append(A, Ap, axis=0)
-                y = np.append(y, beam.cleanf*1)
+                y = np.append(y, beam.cleanf*1-0.0)
                 mask = np.append(mask, maski)
                 ivar = np.append(ivar, beam.ivar.flatten())
         
@@ -795,7 +826,7 @@ class MultiBeam(object):
         except:
             self.mask = mask
             
-    def fit_at_z(self, z=0, coeffs=None, get_fit=False, fit_background=True):
+    def fit_at_z(self, z=0, coeffs=None, get_fit=False, fit_background=True, nolines=False):
         """
         TBD: add photometric constraints, at least from the direct image.
              - should help fits of bright continuum objects
@@ -824,11 +855,11 @@ class MultiBeam(object):
                 mask_nneg = self.mask & (self.y > 0)
                 amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[mask_nneg], Ap[mask_nneg,:].T)
                 init = np.ones(Ap.shape[1])
-                init[self.NTEMP:] = 0.01
+                init[self.NTEMP:] = 0.05
                 # if hasattr(self, 'coeffs'):
                 #     init=self.coeffs
-                coeffs = unicorn.utils_c.run_nmf(self.y[mask_nneg]+0.01, self.ivar[mask_nneg], Ap[mask_nneg,:].T, amat, init_coeffs=init)
-                coeffs[self.NTEMP:] -= 0.01
+                coeffs = unicorn.utils_c.run_nmf(self.y[mask_nneg]+0.05, self.ivar[mask_nneg], Ap[mask_nneg,:].T, amat, init_coeffs=init)
+                coeffs[self.NTEMP:] -= 0.05
                 #self.coeffs = coeffs
             else:
                 ### No background
@@ -836,11 +867,14 @@ class MultiBeam(object):
                 amat = unicorn.utils_c.prepare_nmf_amatrix(self.ivar[mask_nneg], Ap[mask_nneg,:self.NTEMP].T)
                 coeffs = unicorn.utils_c.run_nmf(self.y[mask_nneg], self.ivar[mask_nneg], Ap[mask_nneg,:self.NTEMP].T, amat, toler=1.e-5)
                 coeffs = np.append(coeffs, np.zeros(len(self.beams)))
-
+            
+            if nolines:
+                coeffs[-4:-2] = 0.
+                
         
         out = np.dot(Ap, coeffs)
         if get_fit:
-            return out, coeffs #clf.coef_
+            return out, Ap, coeffs #clf.coef_
             
         lnp = -0.5*np.sum((out-self.y)[self.mask]**2*self.ivar[self.mask])
         
@@ -859,18 +893,23 @@ class MultiBeam(object):
             i1 = beam.modelf.size
             beam.__setattr__(attr, out[i0:i0+i1].reshape(beam.shg))
             i0 += i1
-            
-    def fit_grid(self, zr=[0.7, 3.4], dz=0.01, verbose=True):
+    
+    def get_zgrid(self, zr=[0.7,3.4], dz=0.01):
+        zgrid = np.exp(np.arange(np.log(1+zr[0]), np.log(1+zr[1]), dz))-1
+        return zgrid
+        
+    def fit_grid(self, zr=[0.7, 3.4], dz=0.01, zgrid = None, verbose=True, fit_background=True):
         """
         """
                 
-        zgrid = np.exp(np.arange(np.log(1+zr[0]), np.log(1+zr[1]), dz))-1
+        if zgrid is None:
+            zgrid = self.get_zgrid(zr, dz) # np.exp(np.arange(np.log(1+zr[0]), np.log(1+zr[1]), dz))-1
         
         nz = len(zgrid)
         lnp = np.zeros(nz)
         coeffs = np.zeros((nz, self.A.shape[1]))
         for i in range(nz):
-            lnp[i], coeffs[i,:] = self.fit_at_z(z=zgrid[i])
+            lnp[i], coeffs[i,:] = self.fit_at_z(z=zgrid[i], fit_background=fit_background)
             if verbose:
                 print no_newline + 'id=%d: %.4f  - %.4f' %(self.beams[0].id, zgrid[i], lnp[i])
                 
@@ -900,7 +939,7 @@ class MultiBeam(object):
         
         return refh, ref_wcs
         
-    def drizzle(self, beam_attr='clean', ref_header=None, pixfrac=1, ds9=None, update_fit=True, kernel='square'):
+    def drizzle(self, beam_attr='clean', ref_header=None, pixfrac=1, ds9=None, update_fit=True, kernel='square', thumb=False):
         from drizzlepac import astrodrizzle
               
         if ref_header is None:
@@ -917,7 +956,10 @@ class MultiBeam(object):
         
         for beam in self.beams:
             hdu, beam_wcs = beam.make_wcs_header(data=beam.clean)
-            
+            if thumb:
+                beam_wcs.wcs.crval[0] = ref_wcs.wcs.crval[0]
+                beam_wcs.wcs.cd[0,:] = ref_wcs.wcs.cd[0,:]
+                
             beam_data = beam.__getattribute__(beam_attr)
             if not (beam_data.dtype == np.float32):
                 beam_data = np.cast[np.float32](beam_data) 
@@ -932,7 +974,10 @@ class MultiBeam(object):
         
         outsci /= ref_wcs.pscale**2
         outsci[outwht == 0] = 0
-        return ref_header, outsci, outwht, outctx
+        if thumb:
+            return outsci[:, :outsci.shape[0]]
+        else:
+            return ref_header, outsci, outwht, outctx
         
         ########### DOne
         
@@ -1072,7 +1117,7 @@ def fit_MultiBeam(file='udf_multifit_21798.npy'):
     except:
         return False
         
-    out, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
+    out, Ap, coeff = mb.fit_at_z(z=z_gris, get_fit=True)
     xfit, yfit = mb.get_1d_spec(coeff, z_gris)
     #group.update_model(id, xspec=xfit, yspec=yfit)
     
@@ -1108,7 +1153,8 @@ def _FLT_compute_model(ii, fit_data={}, initialize=True, verbose=True):
             if id in flt.catalog['id']:
                 ix = flt.catalog['id'] == id                    
                 for beam in fit_data[id]['beams']:
-                    if (beam == 'F') & (flt.grism == 'G102'):
+                    #if (beam == 'F') & (flt.grism != 'G102'):
+                    if beam not in flt.conf.beams:
                         continue
                     
                     if verbose > 1:
@@ -1186,7 +1232,7 @@ def _test_figure():
         print 'dz/(1+z): %.4f' %((z_gris-zsp)/(1+zsp))
         #plt.plot(zsp*np.ones(2), [(lnp-lnp.max()).min(), 0], color='k')
     
-    out, coeff = mbd.fit_at_z(z=z_gris, get_fit=True)
+    out, Ap, coeff = mbd.fit_at_z(z=z_gris, get_fit=True)
     xfit, yfit = mbd.get_1d_spec(coeff, z_gris)
     #group.update_model(id, xspec=xfit, yspec=yfit)
     

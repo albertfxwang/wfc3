@@ -3,7 +3,8 @@ Get spacecraft pointing geometry from Jitter files and compare to grism backgrou
 """
 import os
 
-import pyfits
+#import pyfits
+import astropy.io.fits as pyfits
 import numpy as np
 import matplotlib.pyplot as plt
 
