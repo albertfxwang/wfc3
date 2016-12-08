@@ -45,13 +45,13 @@ def fetch_calibs(ima_file, ftpdir='https://hst-crds.stsci.edu/unchecked_get/refe
     import os
     
     if not os.getenv('iref'):
-        print 'No $iref set!  Put it in ~/.bashrc or ~/.cshrc.'
+        print('No $iref set!  Put it in ~/.bashrc or ~/.cshrc.')
         return False
         
     im = pyfits.open(ima_file)
     for ctype in ['BPIXTAB', 'CCDTAB', 'OSCNTAB', 'CRREJTAB', 'DARKFILE', 'NLINFILE', 'PFLTFILE', 'IMPHTTAB', 'IDCTAB']:
         if verbose:
-            print 'Calib: %s=%s' %(ctype, im[0].header[ctype])
+            print('Calib: %s=%s' %(ctype, im[0].header[ctype]))
 
         if im[0].header[ctype] == 'N/A':
             continue
@@ -180,7 +180,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     ### Pop out reads affected by satellite trails or earthshine
     masks = glob.glob(raw.replace('.fits', '*mask.reg'))
     if (len(pop_reads) > 0) | (len(masks) > 0):
-        print '\n****\nPop reads %s from %s\n****\n' %(pop_reads, ima.filename())
+        print('\n****\nPop reads %s from %s\n****\n' %(pop_reads, ima.filename()))
         
         #### Need to put dark back in for Poisson
         dark_file = ima[0].header['DARKFILE'].replace('iref$', os.getenv('iref')+'/')
@@ -190,7 +190,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         #### Need flat for Poisson
         flat_im, flat = get_flat(ima)
         
-        #### Subtract diffs if flagged reads
+        #### Subtract diffs of flagged reads
         diff = np.diff(cube, axis=0)
         dark_diff = np.diff(dark_cube, axis=0)
 
@@ -225,7 +225,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
                 #hot |= (sm / rms) > 3
                 
                 med_i = np.percentile((drate[read,:]-med)[~hot], 50)
-                print med_i
+                print(med_i)
                 
                 drate_ma.mask[read, hot] |= True
                 drate_ma.data[read,:] -= med_i
@@ -245,7 +245,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
                 if mask_read in pop_reads:
                     continue
                 
-                print 'Mask pixels in read %d (%s)' %(mask_read, mask)
+                print('Mask pixels in read %d (%s)' %(mask_read, mask))
                 
                 refhdu = ima['SCI', 1]
                 r = pyregion.open(mask).as_imagecoord(header=refhdu.header)
@@ -272,7 +272,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             #### Subtract out the median of each read to make background flat
             fix_saturated = False
             
-            print '\n*** Flatten ramp ***'
+            print('\n*** Flatten ramp ***')
             ima = pyfits.open(raw.replace('raw', 'ima'), mode='update')
             
             #### Grism exposures aren't flat-corrected
@@ -292,7 +292,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             for i in range(ima[0].header['NSAMP']-2):
                 ima['SCI',i+1].data /= flat
                 med = np.median(ima['SCI',i+1].data[sly, slx])
-                print 'Read #%d, background:%.2f' %(i+1, med)
+                print('Read #%d, background:%.2f' %(i+1, med))
                 ima['SCI',i+1].data += total_countrate - med
             
             if 'G1' in filter:
@@ -329,7 +329,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             #### Initial cleanup
             files=glob.glob(raw.replace('raw', 'ima_*'))
             for file in files:
-                print '#cleanup: rm %s' %(file)
+                print('#cleanup: rm %s' %(file))
                 os.remove(file)
         
             #### Run calwf3 on cleaned IMA
@@ -353,7 +353,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
             ### Clean up
             files=glob.glob(raw.replace('raw', 'ima_*'))
             for file in files:
-                print '#cleanup: rm %s' %(file)
+                print('#cleanup: rm %s' %(file))
                 os.remove(file)
                 
         else:
@@ -366,7 +366,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     #### Background will be different under saturated pixels but maybe won't
     #### matter so much for such bright objects.
     if (fix_saturated):
-        print 'Fix Saturated pixels:'
+        print('Fix Saturated pixels:')
         #### Saturated pixels
         zi, yi, xi = np.indices(dq.shape)
         saturated = (dq & 256) > 0
@@ -398,7 +398,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
         final_dq[fixed_sat] -= 256
         final_dq[sat_zero] |= 256
         
-        print '  Nsat = %d' %(fixed_sat.sum())
+        print('  Nsat = %d' %(fixed_sat.sum()))
         flt['DQ'].data |= final_dq[5:-5,5:-5] & 256
         
     else:
@@ -411,7 +411,7 @@ def make_IMA_FLT(raw='ibhj31grq_raw.fits', pop_reads=[], remove_ima=True, fix_sa
     #### Some earthshine flares DQ masked as 32: "unstable pixels"
     mask = (flt['DQ'].data & 32) > 0
     if mask.sum() > 1.e4:
-        print '\n****\nTake out excessive DQ=32 flags (N=%e)\n****\n' %(mask.sum())
+        print('\n****\nTake out excessive DQ=32 flags (N=%e)\n****\n' %(mask.sum()))
         #flt['DQ'].data[mask] -= 32
         mask = flt['DQ'].data & 32
         ### Leave flagged 32 pixels around the edges
