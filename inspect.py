@@ -41,7 +41,11 @@ import shutil
 import os
 import glob
 
-import Tkinter as tk
+try:
+    import Tkinter as tk
+except:
+    import tkinter as tk
+    
 from PIL import ImageTk, Image
 
 import numpy as np
@@ -176,11 +180,11 @@ class ImageClassifier():
                   
          """
         if len(images) == 0:
-            print 'No images specified'
+            print('No images specified')
             return False
             
         if not os.path.exists(images[0]):
-            print 'First image not found (%s), is path correct?' %(images[0])
+            print('First image not found (%s), is path correct?' %(images[0]))
             return False
         
         ##### Add .fits to filename and make backup if necessary
@@ -196,7 +200,7 @@ class ImageClassifier():
                 bkup_file = self.logfile + '.backup'
                 
             shutil.copy(self.logfile, bkup_file)
-            print 'Made copy of %s -> %s' %(self.logfile, bkup_file)
+            print('Made copy of %s -> %s' %(self.logfile, bkup_file))
         
         ####### Initialize parameters
         self.params = {}        
@@ -346,7 +350,7 @@ class ImageClassifier():
         #self.canvas.tag_raise(self.panel)
         for j in range(self.NREAD):
             if self.read_polygons[j].contains_point((event.x, event.y)):
-                print 'Read #%d!' %(j+1)
+                print('Read #%d!' %(j+1))
                 
                 self.marked_reads[self.i, j] = (not self.marked_reads[self.i, j])*1
                 self.draw_lines()
@@ -475,7 +479,7 @@ class ImageClassifier():
             self.i += 1
             
             while (self.i < self.N-1):
-                print self.i
+                print(self.i)
                 if (self.params['seen'][self.i] == 1) & ('!' not in self.params['comment'][self.i]):
                     self.i += 1
                 else:
@@ -492,7 +496,7 @@ class ImageClassifier():
             self.next_nonzero(key_param[key])
             
         elif key == '?':
-            print """
+            print("""
     Additional keys:
 
       'c':  Open comment box, type <tab> to edit and <enter> when done.
@@ -503,9 +507,9 @@ class ImageClassifier():
       'y':  go to next unambigous
       '?':  this message
       
-"""
+""")
         else:
-            print 'Hotkey (%s) not bound.' %(key)
+            print('Hotkey (%s) not bound.' %(key))
     
     def next_nonzero(self, param=None):
         """
@@ -521,7 +525,7 @@ class ImageClassifier():
         self.i += 1
         
         while (self.i < self.N-1):
-            print self.i
+            print(self.i)
             if (self.params['seen'][self.i] == 1) & (param[self.i] == 0):
                 self.i += 1
             else:
@@ -538,7 +542,7 @@ class ImageClassifier():
         self.params['comment'][self.i] = self.tvar.get()
         
         if self.i == self.N-1:
-            print 'Already at last image'
+            print('Already at last image')
             return False
                     
         self.i += 1
@@ -552,7 +556,7 @@ class ImageClassifier():
         self.params['comment'][self.i] = self.tvar.get() #self.e_comment.get()
 
         if self.i == 0:
-            print 'Already at first image'
+            print('Already at first image')
             return False
                     
         self.i -= 1
@@ -569,7 +573,7 @@ class ImageClassifier():
         ramp_file = self.images[self.i].replace('ramp.png','ramp.dat')
         pop_reads = check_background_SN(ramp_file=ramp_file, show=False)
         
-        print '%s: %d of %d %s' %(self.images[self.i], self.i+1, self.N, pop_reads)
+        print('%s: %d of %d %s' %(self.images[self.i], self.i+1, self.N, pop_reads))
         
         for key in self.buttons.keys():
             button = self.buttons[key]
@@ -611,8 +615,14 @@ class ImageClassifier():
         
         #### Make the table columns, translating numpy data types to "TFORM"
         coldefs = []
-        TFORM = 'A'+str(np.array(self.images).dtype).split('S')[1]
+        dt = str(np.array(self.images).dtype)
+        if 'S' in dt:
+            TFORM = 'A'+dt.split('S')[1]
+        elif 'U' in dt:
+            TFORM = 'A'+dt.split('U')[1]
         
+        print(TFORM)
+            
         coldefs.append(pyfits.Column(name='images', array=np.array(self.images), format=TFORM))
         
         for column in self.params.keys():
@@ -626,11 +636,14 @@ class ImageClassifier():
             if dtype in formats.keys():
                 TFORM=formats[dtype]
             else:
-                if 'S' not in dtype:
-                    print 'Unrecognized data type in: %s' %(dtype)
+                if ('S' not in dtype) & ('U' not in dtype):
+                    print('Unrecognized data type in: %s' %(dtype))
                     return False
                 #
-                TFORM = 'A'+dtype.split('S')[1]
+                if 'S' in dtype:
+                    TFORM = 'A'+dtype.split('S')[1]
+                elif 'U' in dtype:
+                    TFORM = 'A'+dtype.split('U')[1]
             #
             #data = self.params[column]
             if '>' in dtype:
@@ -657,7 +670,7 @@ class ImageClassifier():
             
         thdulist.writeto(self.logfile, clobber=True)
         
-        print 'Log to file %s' %(self.logfile)
+        print('Log to file %s' %(self.logfile))
         
     def read_fits(self):
         """
@@ -673,7 +686,7 @@ class ImageClassifier():
         
         #
         tab = im[1].data
-        print "Read log %s from %s (%s)" %(self.logfile, im[0].header['USER'], im[0].header['MODTIME'])
+        print("Read log %s from %s (%s)" %(self.logfile, im[0].header['USER'], im[0].header['MODTIME']))
         
         colnames = tab.columns.names
         
@@ -700,7 +713,7 @@ class ImageClassifier():
                 
         except:
             #### No astropy?
-            print 'No astropy found.  Forcing image list from %s.' %(self.logfile)
+            print('No astropy found.  Forcing image list from %s.' %(self.logfile))
             pass
             
         self.images = tab['images']
