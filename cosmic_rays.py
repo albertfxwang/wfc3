@@ -26,7 +26,8 @@ def archived_tle():
     #sat = earth.satellite('\n'.join(lines))
     
     #lines = open('2015-16_TLEs.txt').readlines()
-    lines = open('HST_TLE.txt').readlines()
+    #lines = open('HST_TLE.txt').readlines()
+    lines = open('HST_TLE_WFC3.txt').readlines()
     lines = [line.strip() for line in lines]
 
     N = len(lines)//2
@@ -49,9 +50,9 @@ def go():
     """
     tle_times, tle_strings = archived_tle()
     #np.save('2015-16_TLEs.npy', [tle_times, tle_strings])
-    np.save('HST_TLE.npy', [tle_times, tle_strings])
+    np.save('HST_TLE_WFC3.npy', [tle_times, tle_strings])
 
-def get_hst_positions(header, dt=10):
+def get_hst_positions(header=None, interval=None, dt=10, verbose=False):
     """
     Get sublat/sublon of HST based on EXPSTART/STOP keywords in a 
     header
@@ -62,14 +63,23 @@ def get_hst_positions(header, dt=10):
     import astropy.units as u
     
     #tle_times, tle_strings = np.load('2015-16_TLEs.npy')
-    tle_times, tle_strings = np.load('HST_TLE.npy')
+    tle_times, tle_strings = np.load('HST_TLE_WFC3.npy')
 
-    tle_str = tle_strings[np.cast[float](tle_times) > header['EXPSTART']][0].split('\n')
-    hst = ephem.readtle(tle_str[0], tle_str[1], tle_str[2])
-    
-    times = np.arange(header['EXPSTART'], header['EXPEND'], dt/86400.)
+    if interval is None:
+        t0 = header['EXPSTART']
+        t1 = header['EXPEND']
+    else:
+        t0, t1 = interval
+             
+    times = np.arange(t0, t1, dt/86400.)
     pos = np.zeros((len(times), 2))
     for i, t in enumerate(times):
+        if verbose:
+            print(i, t, len(times))
+        
+        tle_str = tle_strings[np.cast[float](tle_times) > t][0].split('\n')
+        hst = ephem.readtle(tle_str[0], tle_str[1], tle_str[2])
+        
         tx = astropy.time.Time(t, format='mjd')
         hst.compute(tx.datetime)
         pos_i = np.array([Angle(hst.sublat*180/np.pi*u.deg).value, Angle(hst.sublong*180/np.pi*u.deg).wrap_at(360*u.deg).value])
@@ -78,7 +88,7 @@ def get_hst_positions(header, dt=10):
     if pos[-1,1] < pos[0,1]:
         pos[pos[:,1] < pos[0,1], 1] += 360 
         
-    return pos
+    return times, pos
         
     # t0x = astropy.time.Time(header['EXPSTART'], format='mjd')
     # hst.compute(t0x.datetime)
@@ -90,7 +100,49 @@ def get_hst_positions(header, dt=10):
     # 
     # start_stop = np.array([ll0, ll1])
     # return start_stop
+
+def for_pmcc():
+    """
+    Compute telescope positions every minute since WFC3 SMOV (May 24, 2009)
+    """
+    import astropy.time
+    import astropy.table
+    t0 = astropy.time.Time('2009-05-14')
+    t1 = astropy.time.Time('2016-12-20')
+    dt = 60#*60*24
     
+    times, coo = get_hst_positions(header=None, interval=[t0.mjd, t1.mjd], dt=dt, verbose=True)
+    
+    tab = astropy.table.Table([times, coo[:,1], coo[:,0]], names=('mjd', 'sublng', 'sublat'))
+    tab.write('HST_SubEarth.fits')
+    
+    ### Compute at fixed times
+    dt = 60.
+    dat = astropy.table.Table.read('pmcc.dat', format='ascii.commented_header')
+    
+    mjd = []
+    lat = []
+    lng = []
+    N = len(dat)
+    for i, t0 in enumerate(dat['mjd']):
+        print('\nNext', i, N, t0)
+        dt0 = 1./86400.*60*30
+        times, coo = get_hst_positions(header=None, interval=[t0-dt0, t0+dt0], dt=dt, verbose=True)
+        mjd = np.append(mjd, times)
+        lat = np.append(lat, coo[:,0])
+        lng = np.append(lng, coo[:,1])
+    
+    tab = astropy.table.Table([mjd, lat, lng], names=('mjd', 'sublat', 'sublng'))
+    tab.write('HST_SubEarth_pmcc.fits')
+    
+    tab['mjd'].format = '16.5f'
+    tab['sublat'].format = '-13.2f'
+    tab['sublng'].format = '-13.2f'
+    
+    tab.write('HST_SubEarth_pmcc.dat', format='ascii.commented_header')
+    
+    
+        
 def test():
     jit = pyfits.open('/Users/brammer/Research/HST/UDS_Arc/LymanALpha/RAW/id8w04010_jit.fits')
     jit = pyfits.open('/Users/brammer/Research/HST/UDS_Arc/LymanALpha/RAW/id8w01010_jit.fits')
@@ -105,7 +157,7 @@ def test():
     tab = astropy.table.Table.read(jit[ix])
 
     pl = plt.plot(tab['Longitude'], tab['Latitude'], linewidth=3, alpha=0.5)
-    coo = get_hst_positions(flc[0].header)
+    times, coo = get_hst_positions(flc[0].header)
     plt.plot(coo[:,1], coo[:,0], color=pl[0].get_color())
 
 def show_darks():
@@ -152,7 +204,7 @@ def show_darks():
         print(i, file)
         #im = pyfits.open(file)
         #coo = get_hst_positions(im[0].header)
-        coo = get_hst_positions(headers[i])
+        times, coo = get_hst_positions(headers[i])
         
         N = coo.shape[0]//2
         

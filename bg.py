@@ -106,7 +106,7 @@ def go():
         root = asn.split('_asn')[0]
         png = glob.glob(root+'*orbit.*')
         if (len(png) > 0) & SKIP:
-            print root
+            print(root)
             continue
         try:
             mywfc3.bg.show_orbit_limbangle(asn=[root])
@@ -124,7 +124,7 @@ def go():
         root=file.split('_j')[0]
         png = glob.glob(root+'*orbit.*')
         if (len(png) > 0) & SKIP:
-            print root
+            print(root)
             continue
         #
         asn.write(root+'_asn.fits')
@@ -138,14 +138,14 @@ def go():
     for file in files:
         asn = threedhst.utils.ASNFile(file.replace('spt','asn'))
         for exp in asn.exposures:
-            print exp
+            print(exp)
             os.system('gunzip %s*fits.gz' %(exp[:-1]))
     #
     gris_spt = np.loadtxt('/tmp/log', dtype=str)
     files=glob.glob('*asn.fits')
     asn_files = []
     for file in files:
-        print file
+        print(file)
         if file.replace('asn','spt') in gris_spt:
             asn_files.append(file)
             
@@ -197,7 +197,7 @@ def compute_sun_zd(root='ibffa4ckq'):
     if False:
         files=glob.glob('*%s*orbit.dat' %('G1'))
         for file in files:
-            print file
+            print(file)
             if os.path.exists(file.replace('dat', 'sun_zd')):
                 continue
             #
@@ -314,7 +314,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
         spt_file = glob.glob('%s*spt.fits*' %(ext.header['EXPNAME'][:-1]))[0]
         expname = spt_file.split('_spt')[0]
         #expname = ext.header['EXPNAME'][:-1]+'q'
-        print expname
+        print(expname)
         spt = pyfits.getheader(spt_file, 0)
         if i == 0:
             targname = spt['TARGNAME']
@@ -367,7 +367,7 @@ def show_orbit_limbangle(asn = ['ib3701050'], ymax=3.8, im_ext='raw', tstr=None)
             shadow_out = astropy.time.Time(jif[i].header['SHADOEXT'].replace('.',':'), format='yday', in_subfmt='date_hms', scale='utc')
             dt_in = (shadow_in-pstr).sec
             dt_out = (shadow_out-pstr).sec
-            print 'JIF: in=%.3f out=%.3f' %(dt_in, dt_out)
+            print('JIF: in=%.3f out=%.3f' %(dt_in, dt_out))
             if dt_in > 0:
                 yi = np.interp(dt_in, (time[1:][ok]), (ramp/dt*GAIN)[ok])
                 ax3.scatter(((pstr-tstr).sec + dt_in)/60., yi, marker='o', s=40, color='green', alpha=0.8)
@@ -645,7 +645,7 @@ def evaluate_bg_sn(raw='ib3712lyq_raw.fits', npix=4):
     plt.plot(t, SN/SN[3], label=raw.split('_')[0])
     plt.plot(t, SN_zodi/SN[3], color='black', linestyle='--')
         
-    print np.ptp(bg.bg[1:])
+    print(np.ptp(bg.bg[1:]))
     
 ### 2D surface http://stackoverflow.com/questions/7997152/python-3d-polynomial-surface-fit-order-dependent
 import itertools
@@ -892,7 +892,7 @@ def plot_F105W_backgrounds():
     ax = fig.add_subplot(111)
     for i, asn in enumerate(asns):
         root = asn.split('_')[0]
-        print i, root
+        print(i, root)
         # os.system('cat %s*%s*orbit.dat > /tmp/%s.dat' %(root[:6], filter, root))
         # bg1 = catIO.Readfile('/tmp/%s.dat' %(root), save_fits=False, force_lowercase=False)
         # bg_min = bg1.bg.min()
@@ -935,7 +935,7 @@ def plot_F105W_backgrounds():
     
     #### Color bright limb by Dec.
     for asn in asns:
-        print root
+        print(root)
         root = asn.split('_')[0]
         os.system('cat %s*orbit.dat > /tmp/%s.dat' %(root[:6], root))
         bg1 = catIO.Readfile('/tmp/%s.dat' %(root), save_fits=False, force_lowercase=False)
@@ -1051,7 +1051,7 @@ def sunangle(filter='F105W', alpha=0.2):
     
     for i, asn in enumerate(asns):
         root = asn.split('_')[0]
-        print i, root
+        print(i, root)
         files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
         min_string = 'zodi prediction'
         for file in files:
@@ -1128,7 +1128,7 @@ def sunangle(filter='F105W', alpha=0.2):
         sun_ha[sun_ha > 12] -= 24 #-sun_ha[sun_ha > -12]+24
         sun_a = np.zeros(bgf.N)
         for i in range(bgf.N):
-            print i
+            print(i)
             sun_a[i] = sun_angle['%sq' %(bgf.name[i].split('j_')[0])]
         
         #
@@ -1151,7 +1151,7 @@ def sunangle(filter='F105W', alpha=0.2):
         bgf.f10 = bgf.bg*0
         files = glob.glob('i*orbit.dat')
         for file in files:
-            print file
+            print(file)
             exp = file.split('j_')[0]
             stdout, stderr = Popen('gethead -x 0 %sq_raw.fits EXPSTART NSAMP' %(exp), shell=True, stdout=PIPE).communicate()
             mjd, nsamp = np.cast[float](stdout.split())
@@ -1195,7 +1195,7 @@ def single_sunangle(filter='F105W', alpha=0.2, log=False, ax=None, cax=None, cma
         if root[:6] in bad_visits:
             continue
         #
-        print i, root
+        print(i, root)
         files=glob.glob('%s*%s*orbit.dat' %(root[:6], filter))
         min_string = 'zodi prediction'
         for file in files:
@@ -1345,7 +1345,7 @@ def get_sun_angle():
     sun_angle = {}
     
     for i in range(sun.N):
-        print i
+        print(i)
         key = sun.FILE[i].split('_spt')[0]
         ra, dec = sun.RA_TARG[i], sun.DEC_TARG[i]
         ra_sun, dec_sun = sun.RA_SUN[i], sun.DEC_SUN[i]
@@ -1457,7 +1457,7 @@ def compare_filters_1083():
         obs_hei = S.Observation(hei, bp)
         obs_cont = S.Observation(continuum, bp)
         obs_zodi = S.Observation(nz, bp)
-        print '%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f zodi=%.2f' %(filter, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25), obs_zodi.countrate())
+        print('%s:  src=%0.2f  line=%.2f   linex25=%.2f  ratio=%.2f zodi=%.2f' %(filter, obs_cont.countrate(), obs_hei.countrate(), obs_hei.countrate()*25, obs_cont.countrate()/(obs_hei.countrate()*25), obs_zodi.countrate()))
 
     #### Check optical filters -> nothing
     # for bp_str in ['acs,wfc1,f814w', 'acs,wfc1,f850lp', 'wfc3,uvis1,f850lp']:
@@ -1485,7 +1485,7 @@ def compare_all():
     files=glob.glob('*asn.fits')
     files.sort()
     for file in files:
-        print file
+        print(file)
         mywfc3.bg.compare_filter_sensitivity(Rap=0.4, mAB=25, root=file)
         
     #    
@@ -1500,7 +1500,7 @@ def compare_all():
     for filt in ['F098M', 'F105W', 'F110W']:
         w_ratio = width[filt]/width['F098M']
         l_ratio = bp[filt].pivot() / bp['F098M'].pivot()
-        print '%s %.3f %.3f %.3f' %(filt, w_ratio, l_ratio, np.sqrt(w_ratio)*l_ratio)
+        print('%s %.3f %.3f %.3f' %(filt, w_ratio, l_ratio, np.sqrt(w_ratio)*l_ratio))
      
     os.system('head -1 ibl70k020_filter_SN.dat > SN_result.dat ; cat *SN.dat |grep -v "\#" >> SN_result.dat')
     x = catIO.Readfile('SN_result.dat')
@@ -1651,7 +1651,7 @@ def compare_filter_sensitivity(Rap=0.4, mAB=25, root='ibp329i[qs]', cax=None):
     for i in range(1, orbit.N):
         if orbit.seconds[i] < orbit.seconds[i-1]:
             t0 += orbit.seconds[i-1]
-            print t0
+            print(t0)
         #
         time[i] += t0
         
@@ -1703,7 +1703,7 @@ def compare_filter_sensitivity(Rap=0.4, mAB=25, root='ibp329i[qs]', cax=None):
             sn_observed[band] = (source_signal[band]/np.sqrt(he_variance))[-1]
             ratio[band] = sn_optimal[band] / sn_observed[band]
         #
-        print '%s  %.0f %d S/N=%.1f eff=%.2f' %(band, time[-1], orbit.nexp[-1], sn_optimal[band], ratio[band]**2)
+        print('%s  %.0f %d S/N=%.1f eff=%.2f' %(band, time[-1], orbit.nexp[-1], sn_optimal[band], ratio[band]**2))
     #
     
     ax.legend(loc='upper left', prop={'size':9}, handlelength=2.5, frameon=False)
@@ -1907,8 +1907,8 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
         
     
     if verbose:
-        print 'File    Ra   Ra_antisun  Ra_antiobj   Bright  Delta  Ecl_Lng'
-        print '%s   %.3f  %.3f  %.3f  %s  %6.1f %6.1f' %(fits, ra, ra_antisun, ra_antiobj, bright, delta, lng)
+        print('File    Ra   Ra_antisun  Ra_antiobj   Bright  Delta  Ecl_Lng')
+        print('%s   %.3f  %.3f  %.3f  %s  %6.1f %6.1f' %(fits, ra, ra_antisun, ra_antiobj, bright, delta, lng))
         
     return ra, ra_antisun, delta, lng, (bright == 'End')*1
         
@@ -1943,7 +1943,7 @@ def test_phase():
         f = glob.glob(n+'_flt.fits*')[0]
         bright = mywfc3.bg.shadow_phase(fits=f, verbose=False)
         xx = names == n
-        print n
+        print(n)
         plt.scatter(ha[xx], (d.bg-d.zodi)[xx], color=colors[bright], alpha=0.1)
         
 def check_ephem():
@@ -2131,7 +2131,7 @@ def future_ephem():
             plt.title(t0.iso)
             t0.out_subfmt = 'date'
             plt.savefig('ephem_%s.png' %(t0.iso))
-            print t0.iso
+            print(t0.iso)
             plt.close()
             t0 = times[i]
             #break
@@ -2214,7 +2214,7 @@ def future_ephem():
                 
                 
                 phases.append(phase)
-                print threedhst.noNewLine + '%d %d %.2f' %(i, len(times), phase)
+                print(threedhst.noNewLine + '%d %d %.2f' %(i, len(times), phase))
                 #break
                 t1, t0, last = None, None, None
     
@@ -2238,7 +2238,7 @@ def test_clean():
     
     mjdi = phase*0.
     for i, file in enumerate(files):
-        print file
+        print(file)
         im = pyfits.open(file)
         mjdi[i] = im[0].header['EXPSTART']
     
@@ -2258,7 +2258,7 @@ def test_clean():
     targ_eq = co.Galactic(targ_lon, targ_lat)
          
     for i, mjd in enumerate(mjds):
-        print i, mjd-mjd0
+        print(i, mjd-mjd0)
         sun_lon, sun_lat = mywfc3.bg.get_sun_ecliptic(mjd=mjd)
         sun.append([sun_lon, sun_lat])
         
@@ -2315,7 +2315,7 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     mjds = np.arange(t0.mjd, t0.mjd+365*year[1])
     times = astropy.time.Time(mjds, format='mjd', scale='utc')
     
-    print 'Get Sun ra/dec from %s' %(os.path.dirname(__file__)+'/data/sun_coords.pkl')
+    print('Get Sun ra/dec from %s' %(os.path.dirname(__file__)+'/data/sun_coords.pkl'))
     
     fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
     hjd = pickle.load(fp)
@@ -2389,7 +2389,7 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     
     if save_fig:
         fig.savefig('%s_shadow_phase.pdf' %(field))
-        print 'Created %s_shadow_phase.pdf.' %(field)
+        print('Created %s_shadow_phase.pdf.' %(field))
     
     return fig, ax
         
@@ -2421,11 +2421,11 @@ def clean_shadow_phase(ra=0, dec=0, mjd=0, flt=None, verbose=True):
     #targ_offset = co.Angle(30, unit=u.deg) + (targ_lon-sun[i][0])
     
     if verbose:
-        print '\n\n'
-        print 'mjd=%f; ra=%f; dec=%f' %(mjd, ra, dec)
-        print 'Target: ', targ_eq
-        print 'Sun:    ', sun_eq
-        print sun_angle.deg, sun_ref, -targ_offset.wrap_at(180*u.deg).deg, -targ_offset.wrap_at(180*u.deg).deg/180.
+        print('\n\n')
+        print('mjd=%f; ra=%f; dec=%f' %(mjd, ra, dec))
+        print('Target: ', targ_eq)
+        print('Sun:    ', sun_eq)
+        print(sun_angle.deg, sun_ref, -targ_offset.wrap_at(180*u.deg).deg, -targ_offset.wrap_at(180*u.deg).deg/180.)
     
     return targ_lon, sun_lon, -targ_offset.wrap_at(180*u.deg).deg/180.
     
@@ -2475,7 +2475,7 @@ def get_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
         import ephem
         ecl_lon, ecl_lat = get_ephem_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
     except:
-        print 'No -ephem- module found, get from NED HTML.'
+        print('No -ephem- module found, get from NED HTML.')
         ecl_lon, ecl_lat = get_ned_ecliptic_coords(ra=ra, dec=dec, mjd=mjd)
         
     return ecl_lon, ecl_lat
@@ -2526,7 +2526,7 @@ def get_ned_ecliptic_coords(ra=0, dec=0, mjd=0, flt=None):
     spl = np.cast[float](t0.yday.split(':'))
     yday_epoch = spl[0]+spl[1]/365.
     
-    print 'Get ecliptic coords: ra=%f; dec=%f; mjd=%f' %(ra, dec, mjd)
+    print('Get ecliptic coords: ra=%f; dec=%f; mjd=%f' %(ra, dec, mjd))
     
     os.system('wget --no-verbose -O /tmp/ned_Ecl.dat "http://ned.ipac.caltech.edu/cgi-bin/calc?in_csys=Equatorial&in_equinox=J2000.0&obs_epoch=%f&lon=%fd+&lat=%fd&pa=0&out_csys=Ecliptic&out_equinox=J2000.0"' %(yday_epoch, ra, dec))
     

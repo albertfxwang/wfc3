@@ -26,7 +26,7 @@ def wfc3_history():
     from astropy.io import ascii
     
     catalog = os.path.join(os.path.dirname(__file__), 'data/hst_search.txt.gz')
-    print 'Read %s' %(catalog)
+    print('Read %s' %(catalog))
     tab = ascii.read(catalog, data_start=2, delimiter=',')
     tab.rename_column('RA (J2000)', 'ra')
     tab.rename_column('Dec (J2000)', 'dec')
@@ -56,14 +56,14 @@ def parse_history():
         p = programs[prog]
         if 'G141' in p['filters'].keys():
             if p['filters']['G141'] > 5:
-                print prog, p
+                print(prog, p)
     
     ## F105 / F110W / F098M
     for prog in progs:
         p = programs[prog]
         if 'F105W' in p['filters'].keys():
             if p['filters']['F105W'] > 2:
-                print prog, p
+                print(prog, p)
 
 def esa_fetch(program=14227):
     """
@@ -120,7 +120,7 @@ def program_regions(program=13420, query=None):
     
     old_visit = '--'
     for file in files:
-        print file
+        print(file)
         im = pyfits.open(file)
 
         visit = os.path.basename(file)[4:6]
