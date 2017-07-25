@@ -16,7 +16,7 @@ import astropy.units as u
 import datetime
 
 from mywfc3.utils import gzfile
-import unicorn
+#import unicorn
 
 def cgs_to_rayleigh(flux_cgs=1.e-16, flux_cps=None, area=0.0164):
     """
@@ -981,7 +981,8 @@ def show_with_f10(log=False):
     """   
     import mywfc3.bg
     from threedhst import catIO
-    import cPickle as pickle
+    # import cPickle as pickle
+    import pickle
     import scipy
     
     ###### Figure of tracks colored by sun angle
@@ -1027,7 +1028,8 @@ def show_with_f10(log=False):
 def sunangle(filter='F105W', alpha=0.2):
     import mywfc3.bg
     from threedhst import catIO
-    import cPickle as pickle
+    # import cPickle as pickle
+    import pickle
     import scipy
     
     asns = glob.glob('*%s*orbit.png' %(filter))
@@ -1162,7 +1164,8 @@ def sunangle(filter='F105W', alpha=0.2):
 def single_sunangle(filter='F105W', alpha=0.2, log=False, ax=None, cax=None, cmap='jet'):
     import mywfc3.bg
     from threedhst import catIO
-    import cPickle as pickle
+    # import cPickle as pickle
+    import pickle
     import scipy
     
     asns = glob.glob('*%s*orbit.png' %(filter))
@@ -1332,8 +1335,9 @@ def get_sun_angle():
     import pyfits
     import astropy.coordinates as c
     import astropy.units as u
-    import cPickle as pickle
-    
+    #import cPickle as pickle
+    import pickle
+        
     if hasattr(c, 'ICRS'):
         icrs = c.ICRS
     else:
@@ -1826,7 +1830,8 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
     
     """
     import ephem
-    import cPickle as pickle
+    # import cPickle as pickle
+    import pickle
     import astropy.coordinates as co
     import astropy.units as u
     
@@ -1836,12 +1841,13 @@ def shadow_phase(fits='ib5x51l5q_flt.fits.gz', info=None, verbose=True):
         icrs = co.ICRSCoordinates
     
     import subprocess
-    #hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
-    # fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','wb')
-    # pickle.dump(hjd, fp)
-    # pickle.dump(hra, fp)
-    # pickle.dump(hdec, fp)
-    # fp.close()
+    if False:
+        hjd, hra, hdec = np.loadtxt('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.dat', unpack=True)
+        fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','wb')
+        pickle.dump(hjd, fp)
+        pickle.dump(hra, fp)
+        pickle.dump(hdec, fp)
+        fp.close()
     
     #fp = open('/Users/brammer/WFC3/Backgrounds/Synphot/sun_coords.pkl','rb')
     fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
@@ -2304,9 +2310,10 @@ def test_clean():
     ax.scatter(tt.plot_date, phase, color='orange', s=50, alpha=0.5, zorder=10)
     fig.savefig('cosmos_shadow_phase_data.pdf')
     
-def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149', save_fig=True):
+def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), title='Target', save_fig=True, _angle_offset=30):
     import pickle
     import astropy.coordinates as co
+    from astropy.coordinates import Angle
     import astropy.units as u
     from matplotlib.ticker import MultipleLocator
     from matplotlib.dates import MonthLocator
@@ -2315,14 +2322,31 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     mjds = np.arange(t0.mjd, t0.mjd+365*year[1])
     times = astropy.time.Time(mjds, format='mjd', scale='utc')
     
-    print('Get Sun ra/dec from %s' %(os.path.dirname(__file__)+'/data/sun_coords.pkl'))
+    ### Sun RA/Dec from Horizons database:
+    # https://ssd.jpl.nasa.gov/horizons.cgi#top
+    # Ephemeris Type [change] :     OBSERVER
+    # Target Body [change] :    Sun [Sol] [10]
+    # Observer Location [change] :  Geocentric [500]
+    # Time Span [change] :  Start=2001-01-01, Stop=2024-01-01, Step=1 d
+    # Table Settings [change] :     QUANTITIES=2; date/time format=JD; angle format=DEG
+    # Display/Output [change] :     download/save (plain text file)
     
-    fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
-    hjd = pickle.load(fp)
-    hra = pickle.load(fp)
-    hdec = pickle.load(fp)
-    fp.close()
+    print('Get Sun ra/dec from %s' %(os.path.dirname(__file__)+'/data/sun_coords.dat'))
     
+    # fp = open(os.path.dirname(__file__)+'/data/sun_coords.pkl','rb')
+    # hjd = pickle.load(fp)
+    # hra = pickle.load(fp)
+    # hdec = pickle.load(fp)
+    # fp.close()
+    # 
+    hjd, hra, hdec = np.loadtxt(os.path.dirname(__file__)+'/data/sun_coords.dat', unpack=True)
+    
+    if isinstance(ra, str):
+        ra = Angle(ra, unit=u.hourangle).deg
+    
+    if isinstance(dec, str):
+        dec = Angle(dec, unit=u.deg).deg
+                
     sun_lon = co.Longitude(np.interp(mjds, hjd-24.e5-0.5, hra)*u.deg)
     targ_lon, targ_lat = get_ecliptic_coords(ra=ra, dec=dec, mjd=mjds[180])   
     targ_eq = co.Galactic(targ_lon, targ_lat)
@@ -2330,7 +2354,7 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     
     sun_angle = targ_eq.separation(sun_eq)
     
-    targ_offset = co.Angle(30, unit=u.deg)+ (targ_lon-sun_lon)
+    targ_offset = co.Angle(_angle_offset, unit=u.deg)+ (targ_lon-sun_lon)
     phase = -targ_offset.wrap_at(180*u.deg).deg/180.
             
     fig = plt.figure(figsize=(8,6))
@@ -2361,11 +2385,11 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     ax.scatter(times.plot_date[avoid], phase[avoid], marker='.', s=8, color='w', linewidth=2, alpha=0.6, zorder=4)
     
     ax.fill_between([times.plot_date.min(), times.plot_date.max()], [0.25,0.25],[1.0,1.0], color='0.8', alpha=0.5, zorder=0)
-    ax.text(times.plot_date.min()+dt, 0.3, 'Put F105W at BEGINNING of the orbit', ha='left', va='bottom', color='0.6', zorder=0)
+    ax.text(times.plot_date.min()+dt, 0.3, 'Put F105W/F110W/grisms at BEGINNING of the orbit', ha='left', va='bottom', color='0.6', zorder=0)
     ax.text(times.plot_date.min()+dt, 0.0, '(Sunlight for most of the orbit)', ha='left', va='bottom', color='0.6', zorder=0)
     
     ax.fill_between([times.plot_date.min(), times.plot_date.max()], [-0.25,-0.25],[-1.0,-1.0], color='0.8', alpha=0.5, zorder=0)
-    ax.text(times.plot_date.min()+dt, -0.3, 'Put F105W at END of the orbit', ha='left', va='top', color='0.6', zorder=0)
+    ax.text(times.plot_date.min()+dt, -0.3, 'Put F105W/F110W/grisms at END of the orbit', ha='left', va='top', color='0.6', zorder=0)
     
     ax.set_ylim(-1.3, 1.3)
     ax2.set_ylim(0,180)
@@ -2378,18 +2402,18 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), field='MACS1149
     ax2.yaxis.set_minor_locator(MultipleLocator(10))
     ax.xaxis.set_minor_locator(MonthLocator(interval=1))
     
-    if field:
-        title_str = '%s: ra=%.4f, dec=%.4f' %(field, ra, dec)
+    if title:
+        title_str = '%s: ra=%.4f, dec=%.4f' %(title, ra, dec)
     else:
         title_str = 'ra=%.4f, dec=%.4f' %(ra, dec)
     
     ax.set_title(title_str)
     fig.autofmt_xdate()
-    fig.tight_layout()
+    fig.tight_layout(pad=0.1)
     
     if save_fig:
-        fig.savefig('%s_shadow_phase.pdf' %(field))
-        print('Created %s_shadow_phase.pdf.' %(field))
+        fig.savefig('%s_shadow_phase.pdf' %(title))
+        print('Created %s_shadow_phase.pdf.' %(title))
     
     return fig, ax
         
