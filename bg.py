@@ -2376,7 +2376,7 @@ def show_object_phase(ra=177.40125, dec=22.3974, year=(2014, 1), title='Target',
     ax2.plot(times.plot_date, sun_angle.deg, linestyle='-', marker='None', color='blue', linewidth=2, alpha=0.2, zorder=1)
     ax2.plot(times.plot_date, np.maximum(sun_angle.deg, 50), linestyle='-', marker='None', color='blue', linewidth=2, alpha=0.5, zorder=1)
     ax2.set_ylabel('Sun Angle')
-    ax2.plot(times.plot_date[-100*year[1]:], times.plot_date[-100*year[1]:]*0.+50, color='blue', linestyle='--', alpha=0.5, zorder=4)
+    ax2.plot(times.plot_date[-100*int(year[1]):], times.plot_date[-100*int(year[1]):]*0.+50, color='blue', linestyle='--', alpha=0.5, zorder=4)
     dt = 12.5*year[1]
     ax2.text(times.plot_date[-1]-dt, 48, 'Sun angle > 50', color='blue', zorder=1, fontsize=8, ha='right', va='top', alpha=0.8)
     
